@@ -357,12 +357,14 @@
     const error = $('#login-error');
 
     // Password eye toggle
+    const eyeOpen = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const eyeClosed = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
     $$('.pw-eye').forEach(btn => {
       btn.addEventListener('click', () => {
         const input = $('#' + btn.dataset.target);
         const isPassword = input.type === 'password';
         input.type = isPassword ? 'text' : 'password';
-        btn.textContent = isPassword ? '🙈' : '👁';
+        btn.innerHTML = isPassword ? eyeClosed : eyeOpen;
       });
     });
 
@@ -421,7 +423,13 @@
 
       // Check if admin
       const adminDoc = await db.collection('admins').doc(email).get();
-      if (adminDoc.exists) {
+      const isAdmin = adminDoc.exists;
+
+      // Check if also cap de colla
+      const capSnap = await db.collection('caps').where('email', '==', email).get();
+      const isCap = !capSnap.empty;
+
+      if (isAdmin) {
         currentRole = 'admin';
         $('#admin-user-label').textContent = email;
         showView('view-admin-dashboard');
@@ -430,9 +438,7 @@
         return;
       }
 
-      // Check if cap de colla
-      const capSnap = await db.collection('caps').where('email', '==', email).get();
-      if (!capSnap.empty) {
+      if (isCap) {
         currentRole = 'cap';
         const capData = capSnap.docs[0].data();
         $('#cap-user-label').textContent = capData.name || email;
@@ -737,18 +743,10 @@
         }
 
         const password = generatePassword();
+        let passwordToStore = password;
+        let authAccountExisted = false;
 
-        // We need to create a Firebase Auth account for the cap.
-        // Since we're logged in as admin, we need to use a workaround:
-        // Sign in with a secondary auth instance, or create + sign back in.
-        // Using the admin's current credentials stored approach:
-
-        // Save current admin credentials
-        const adminEmail = currentUser.email;
-
-        // Create the new auth account
-        // We'll use a fetch to Firebase Auth REST API to create the user
-        // without signing out the current admin
+        // Create Firebase Auth account via REST API (without signing out current admin)
         const apiKey = firebase.app().options.apiKey;
         const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
           method: 'POST',
@@ -763,23 +761,30 @@
         const result = await response.json();
         if (result.error) {
           if (result.error.message === 'EMAIL_EXISTS') {
-            toast('Ja existeix un compte amb aquest correu.', 'error');
+            // Auth account already exists (e.g., admin adding themselves as cap)
+            // Just create the Firestore doc, store "(compte existent)" as password
+            authAccountExisted = true;
+            passwordToStore = '(utilitza la contrasenya existent)';
           } else {
             toast('Error creant el compte: ' + result.error.message, 'error');
+            hideLoading();
+            return;
           }
-          hideLoading();
-          return;
         }
 
         // Store in Firestore with plain password
         await db.collection('caps').add({
           email: email,
           name: name,
-          plainPassword: password,
+          plainPassword: passwordToStore,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
-        toast(`Cap de colla afegit: ${email}`, 'success');
+        if (authAccountExisted) {
+          toast(`Cap de colla afegit: ${email} (compte existent, mateixa contrasenya)`, 'success');
+        } else {
+          toast(`Cap de colla afegit: ${email}`, 'success');
+        }
         $('#add-cap-form').reset();
         loadAdminCaps();
       } catch (e) {
@@ -1106,7 +1111,7 @@
   async function init() {
     showView('view-landing');
 
-    // Initialize all modules first so buttons always work
+    // Initialize all UI modules first so buttons always work
     initLanding();
     initRegistration();
     initConfirmation();
@@ -1114,14 +1119,17 @@
     initLogin();
     initCapDashboard();
     initAdminDashboard();
-    initAuthListener();
 
-    // Seed admin accounts in background (only runs once)
+    // Seed admin accounts BEFORE starting the auth listener
+    // to avoid sign-in/sign-out interference
     try {
       await seedAdmins();
     } catch (e) {
       console.warn('Admin seeding error (may be normal on first load):', e);
     }
+
+    // Now start listening for auth state changes
+    initAuthListener();
   }
 
   // Wait for Firebase to be ready
