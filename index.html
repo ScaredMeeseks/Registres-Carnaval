@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registre Carnaval</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ========== 1. LANDING ========== -->
+  <div id="view-landing" class="view">
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <div class="logo">🎭</div>
+          <h1>Registre Carnaval</h1>
+          <p class="subtitle">Introdueix el codi de 6 caràcters de la teva colla</p>
+        </div>
+        <div id="landing-error" class="error-msg" hidden></div>
+        <div class="form-group">
+          <label for="code-input">Codi de la Colla</label>
+          <input type="text" id="code-input" maxlength="6" placeholder="Ex: AB12CD" autocomplete="off" style="text-transform:uppercase; text-align:center; font-size:1.5rem; letter-spacing:.3rem;">
+        </div>
+        <button id="btn-validate-code" class="btn btn-primary btn-full" style="margin-bottom:1rem;">Accedir</button>
+        <div class="auth-switch">
+          <button id="btn-go-login" class="btn btn-outline btn-full">Sóc Cap de Colla</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 2. REGISTRATION ========== -->
+  <div id="view-register" class="view" hidden>
+    <div class="auth-container">
+      <div class="auth-card" style="max-width:500px;">
+        <div class="auth-header">
+          <h1>Registre</h1>
+          <p class="subtitle" id="register-colla-name"></p>
+        </div>
+        <div id="register-error" class="error-msg" hidden></div>
+        <form id="register-form" autocomplete="off">
+          <div class="form-group">
+            <label for="reg-name">Nom</label>
+            <input type="text" id="reg-name" required>
+          </div>
+          <div class="form-group">
+            <label for="reg-surname">Cognoms</label>
+            <input type="text" id="reg-surname" required>
+          </div>
+          <div class="form-group">
+            <label for="reg-id">DNI / NIE / Passaport</label>
+            <input type="text" id="reg-id" required>
+          </div>
+          <div class="form-group">
+            <label for="reg-email">Correu electrònic</label>
+            <input type="email" id="reg-email" required>
+          </div>
+          <div class="form-group">
+            <label for="reg-phone">Telèfon</label>
+            <input type="tel" id="reg-phone" required>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="btn-register-back" class="btn btn-outline">Tornar</button>
+            <button type="submit" class="btn btn-primary">Continuar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 3. CONFIRMATION ========== -->
+  <div id="view-confirm" class="view" hidden>
+    <div class="auth-container">
+      <div class="auth-card" style="max-width:500px;">
+        <div class="auth-header">
+          <h1>Confirma les teves dades</h1>
+          <p class="subtitle">Revisa que tot sigui correcte</p>
+        </div>
+        <div class="confirm-data">
+          <div class="confirm-row"><span class="confirm-label">Nom:</span> <span id="confirm-name"></span></div>
+          <div class="confirm-row"><span class="confirm-label">Cognoms:</span> <span id="confirm-surname"></span></div>
+          <div class="confirm-row"><span class="confirm-label">DNI/NIE/Passaport:</span> <span id="confirm-id"></span></div>
+          <div class="confirm-row"><span class="confirm-label">Correu:</span> <span id="confirm-email"></span></div>
+          <div class="confirm-row"><span class="confirm-label">Telèfon:</span> <span id="confirm-phone"></span></div>
+        </div>
+        <div class="form-actions" style="margin-top:1.5rem;">
+          <button id="btn-confirm-back" class="btn btn-outline">Tornar</button>
+          <button id="btn-confirm-submit" class="btn btn-primary">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 4. TERMS & CONDITIONS ========== -->
+  <div id="view-terms" class="view" hidden>
+    <div class="auth-container" style="padding:1rem;">
+      <div class="terms-card">
+        <div class="auth-header">
+          <h1>Termes i Condicions</h1>
+          <p class="subtitle">Llegeix el document fins al final per poder acceptar</p>
+        </div>
+        <div id="terms-scroll-container" class="terms-scroll-container">
+          <iframe id="terms-pdf" src="docs/terms.html"></iframe>
+          <div class="terms-bottom-marker" id="terms-bottom-marker"></div>
+        </div>
+        <div class="terms-accept">
+          <label class="checkbox-label" id="tc-checkbox-label">
+            <input type="checkbox" id="tc-checkbox" disabled>
+            <span>Accepto els Termes i Condicions</span>
+          </label>
+          <p class="terms-hint" id="terms-hint">↓ Desplaça't fins al final del document</p>
+        </div>
+        <button id="btn-terms-save" class="btn btn-primary btn-full" disabled>Desar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 5. SUCCESS ========== -->
+  <div id="view-success" class="view" hidden>
+    <div class="auth-container">
+      <div class="auth-card" style="text-align:center;">
+        <div class="success-icon">✅</div>
+        <h1 style="margin:.8rem 0;">Tot fet!</h1>
+        <p class="subtitle" style="margin-bottom:1.5rem;">El teu registre s'ha completat correctament.</p>
+        <button id="btn-success-home" class="btn btn-primary btn-full">Tornar a l'inici</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 6. LOGIN ========== -->
+  <div id="view-login" class="view" hidden>
+    <div class="auth-container">
+      <div class="auth-card">
+        <div class="auth-header">
+          <div class="logo">🎭</div>
+          <h1>Accés Cap de Colla / Admin</h1>
+          <p class="subtitle">Introdueix les teves credencials</p>
+        </div>
+        <div id="login-error" class="error-msg" hidden></div>
+        <form id="login-form" autocomplete="off">
+          <div class="form-group">
+            <label for="login-email">Correu electrònic</label>
+            <input type="email" id="login-email" required>
+          </div>
+          <div class="form-group">
+            <label for="login-password">Contrasenya</label>
+            <div class="password-wrap">
+              <input type="password" id="login-password" required>
+              <button type="button" class="pw-eye" data-target="login-password" title="Mostrar/amagar">👁</button>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-full" style="margin-bottom:1rem;">Entrar</button>
+        </form>
+        <div class="auth-switch">
+          <button id="btn-login-back" class="btn btn-outline btn-full">Tornar a l'inici</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 7. CAP DE COLLA DASHBOARD ========== -->
+  <div id="view-cap-dashboard" class="view" hidden>
+    <nav class="topnav">
+      <div class="topnav-logo">🎭 Registre Carnaval</div>
+      <div class="topnav-right">
+        <span class="nav-user" id="cap-user-label"></span>
+        <button id="btn-cap-logout" class="btn btn-small btn-outline" style="color:#fff;border-color:rgba(255,255,255,.3);">Tancar sessió</button>
+      </div>
+    </nav>
+    <div class="dashboard-content">
+      <div class="dash-header">
+        <h1>Persones Registrades</h1>
+        <div class="dash-header-actions">
+          <button id="btn-cap-export" class="btn btn-accent btn-small">📥 Exportar a Excel</button>
+        </div>
+      </div>
+      <div id="cap-colla-tabs" class="colla-tabs"></div>
+      <!-- PDF Upload -->
+      <div class="admin-form-card" id="cap-pdf-upload-card">
+        <h2>📄 Document de Termes i Condicions</h2>
+        <p id="cap-pdf-status" style="font-size:.88rem;color:var(--text-secondary);margin-bottom:.8rem;">Cap document pujat encara.</p>
+        <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;">
+          <input type="file" id="cap-pdf-input" accept=".pdf,.html" hidden>
+          <button type="button" id="btn-cap-pdf-choose" class="btn btn-outline btn-small">📂 Seleccionar fitxer...</button>
+          <span id="cap-pdf-filename" style="font-size:.85rem;color:var(--text-secondary);">Cap arxiu seleccionat</span>
+          <button id="btn-cap-pdf-upload" class="btn btn-primary btn-small">Pujar PDF</button>
+          <button id="btn-cap-pdf-remove" class="btn btn-danger btn-small" hidden>Eliminar PDF</button>
+        </div>
+        <p style="font-size:.75rem;color:var(--text-secondary);margin-top:.5rem;">Formats acceptats: PDF, HTML.</p>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table" id="cap-table">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th>Cognoms</th>
+              <th>DNI/NIE</th>
+              <th>Correu</th>
+              <th>Telèfon</th>
+              <th>Data registre</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="cap-table-body"></tbody>
+        </table>
+        <p id="cap-table-empty" class="table-empty" hidden>No hi ha persones registrades encara.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 8. ADMIN DASHBOARD ========== -->
+  <div id="view-admin-dashboard" class="view" hidden>
+    <nav class="topnav">
+      <div class="topnav-logo">🎭 Registre Carnaval — Admin</div>
+      <div class="topnav-right">
+        <span class="nav-user" id="admin-user-label"></span>
+        <button id="btn-admin-logout" class="btn btn-small btn-outline" style="color:#fff;border-color:rgba(255,255,255,.3);">Tancar sessió</button>
+      </div>
+    </nav>
+    <div class="dashboard-layout">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-item active" data-admin-tab="caps">👤 Caps de Colla</div>
+        <div class="sidebar-item" data-admin-tab="colles">🏠 Colles</div>
+        <div class="sidebar-item" data-admin-tab="registrations">📋 Tots els registres</div>
+      </aside>
+      <!-- Content -->
+      <div class="dashboard-content">
+
+        <!-- Tab: Caps de Colla -->
+        <div id="admin-tab-caps" class="admin-tab">
+          <div class="dash-header">
+            <h1>Gestió Caps de Colla</h1>
+          </div>
+          <div class="admin-form-card">
+            <h2>Afegir Cap de Colla</h2>
+            <form id="add-cap-form" class="inline-form">
+              <div class="form-group">
+                <label for="cap-email">Correu electrònic</label>
+                <input type="email" id="cap-email" required placeholder="email@exemple.com">
+              </div>
+              <div class="form-group">
+                <label for="cap-name">Nom</label>
+                <input type="text" id="cap-name" required placeholder="Nom del cap">
+              </div>
+              <button type="submit" class="btn btn-primary">Afegir</button>
+            </form>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="admin-caps-table">
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>Correu</th>
+                  <th>Contrasenya</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="admin-caps-body"></tbody>
+            </table>
+            <p id="admin-caps-empty" class="table-empty" hidden>No hi ha caps de colla.</p>
+          </div>
+        </div>
+
+        <!-- Tab: Colles -->
+        <div id="admin-tab-colles" class="admin-tab" hidden>
+          <div class="dash-header">
+            <h1>Gestió Colles</h1>
+          </div>
+          <div class="admin-form-card">
+            <h2>Afegir Colla Nova</h2>
+            <form id="add-colla-form" class="inline-form">
+              <div class="form-group">
+                <label for="colla-name">Nom de la Colla</label>
+                <input type="text" id="colla-name" required placeholder="Nom de la colla">
+              </div>
+              <button type="submit" class="btn btn-primary">Crear Colla</button>
+            </form>
+          </div>
+          <div class="admin-form-card">
+            <h2>Assignar Cap de Colla a una Colla</h2>
+            <form id="assign-cap-form" class="inline-form">
+              <div class="form-group">
+                <label for="assign-colla">Colla</label>
+                <select id="assign-colla" required>
+                  <option value="">— Selecciona colla —</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="assign-cap">Cap de Colla</label>
+                <select id="assign-cap" required>
+                  <option value="">— Selecciona cap —</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-primary">Assignar</button>
+            </form>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="admin-colles-table">
+              <thead>
+                <tr>
+                  <th>Nom de la Colla</th>
+                  <th>Codi</th>
+                  <th>Caps de Colla</th>
+                  <th>PDF T&C</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="admin-colles-body"></tbody>
+            </table>
+            <p id="admin-colles-empty" class="table-empty" hidden>No hi ha colles.</p>
+          </div>
+        </div>
+
+        <!-- Tab: Tots els registres -->
+        <div id="admin-tab-registrations" class="admin-tab" hidden>
+          <div class="dash-header">
+            <h1>Tots els Registres</h1>
+            <div class="dash-header-actions">
+              <button id="btn-admin-export" class="btn btn-accent btn-small">📥 Exportar a Excel</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="admin-reg-table">
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>Cognoms</th>
+                  <th>DNI/NIE</th>
+                  <th>Correu</th>
+                  <th>Telèfon</th>
+                  <th>Colla</th>
+                  <th>Data</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="admin-reg-body"></tbody>
+            </table>
+            <p id="admin-reg-empty" class="table-empty" hidden>No hi ha registres.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Firebase SDK (compat v9) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+
+  <!-- App -->
+  <script src="js/firebase-config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
