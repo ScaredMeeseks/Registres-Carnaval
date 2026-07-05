@@ -53,6 +53,7 @@ Git is the source of truth for everything.
 ## Known issues / accepted trade-offs
 
 - **Stale JS after deploys**: GitHub Pages offers no cache control, and rules changes can break cached old frontends (2026-07-05: a cap got "Error carregant registres" because cached JS still queried by `collaCode`, which the new rules reject; fixed by hard refresh). If this recurs, the fix is moving hosting to Firebase Hosting with no-cache headers (considered 2026-07-05, deferred).
+- **Pages deploy step can fail transiently**: on 2026-07-05 the forms commit's "pages build and deployment" run built fine but the deploy step failed on GitHub's side — the site silently kept serving old code. If a push doesn't appear live, check the repo's Actions tab; a retry (GitHub's own, or an empty commit push) fixes it. Verify with `curl` that the live JS contains the new code.
 - `colles` is publicly readable (needed for register-code validation) → colla names + cap emails are enumerable.
 - `users` docs are keyed by (and contain) email → **colla members can see each other's emails**, not just names (unavoidable: backfilled legacy people have no Auth uid). DNI/phone stay cap/admin-only in `registrations`.
 - One account = one person = one colla. Duplicate emails across legacy registrations: the v2 backfill keeps the first; a person in two colles isn't supported (signup links the account to the existing colla and shows an info toast).
@@ -63,7 +64,7 @@ Git is the source of truth for everything.
 
 ## Changelog
 
-### 2026-07-05 (6th pass) — Formularis (colla questionnaires) — **rules deploy pending**
+### 2026-07-05 (6th pass) — Formularis (colla questionnaires) — deployed same day (`fdda122`)
 - New `forms` collection + `responses` subcollection (see table). Caps build forms in a new 4th sub-nav tab "📝 Formularis": unlimited questions, single/multi select, options one-per-line, optional "Altres" free-text choice, per-question required flag. Forms are immutable after creation (delete only, cascades responses client-side).
 - Member feed: unanswered forms show **first and highlighted** (amber card); click header to expand → answer → Enviar (validates required + "Altres" text; option values are indices so option text never hits an attribute). After submitting the card turns normal and expands to a **read-only** view of own answers — responses have no update rule, so they're immutable server-side too.
 - Cap summaries per form: participation `X/Y (Z%)` (Y = colla registrations count), per-option single-hue horizontal CSS bars (brand primary on recessive track, counts in ink — dataviz-skill validated), "Altres" answers listed, per-form Excel (two sheets: Respostes with one column per question, Resum with per-option counts).
@@ -72,7 +73,7 @@ Git is the source of truth for everything.
 ### 2026-07-05 (5th pass) — T&C status column in the cap table
 - Cap registrations table shows "✅ Sí / ⏳ Pendent" per person from `tcAccepted`; cap Excel export gained a "T&C acceptats" column (the admin export already had one). Frontend-only.
 
-### 2026-07-05 (4th pass) — Deferred T&C, pinned posts, post images + YouTube — **rules deploy pending**
+### 2026-07-05 (4th pass) — Deferred T&C, pinned posts, post images + YouTube — deployed same day (`521a1fb`)
 - **Deferred T&C acceptance**: colles without an uploaded T&C no longer show the `docs/terms.html` placeholder. Registration skips the terms screen, writes `tcAccepted: false` + profile `tcPending: true`, shows an info note on the success screen, and `routeUser()` prompts the member to scroll-accept at login once the colla has a `pdfUrl` (terms view reused in `termsMode = 'acceptance'`; button says "Acceptar"). Rules: `tcAccepted:false` creates allowed only when the colla has no `pdfUrl`; members may update only their own `tcAccepted` → `true`. `loadCollaPdf()` removed. Cap PDF card copy explains pending registrations.
 - **Pinned posts**: `posts.pinned` toggled from the cap list (📌 Fixar/Desfixar); `renderPostsList` stable-sorts pinned first (no new index) and shows 📌 + accent border.
 - **Post images**: optional image per post (≤5 MB) uploaded to Storage `posts/{collaId}/` (new storage.rules block), rendered in cards (click = full size), deleted with the post via `deleteStoredImage` (renamed from `deleteServiceImage`, shared with services).
