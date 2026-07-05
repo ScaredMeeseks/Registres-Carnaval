@@ -7,7 +7,7 @@ Rolling architecture + changelog document. **Update after every code change.** C
 Account-based registration + supply-ordering app for carnival groups ("colles"), Catalan UI only. The app opens on a **login page**; first-timers register via a "Registra't" button.
 
 - **Participants / members** (email+password account): register with a 6-char colla code → personal-data form (nom, cognoms, DNI/NIE, correu, telèfon, contrasenya) → confirm → scroll-read T&C → accept. **Only at acceptance** the Auth account is created and the registration + `users/{email}` profile are written. **If the colla has not published its T&C**, the terms screen is skipped: the registration is written with `tcAccepted: false`, the profile gets `tcPending: true`, and the member is **prompted to scroll-accept at login** once the colla uploads a document (the bundled `docs/terms.html` placeholder is no longer shown). Logged-in members see their **colla page**: cap-published posts (pinned first; text, images, YouTube embeds, links) and the names of fellow members.
-- **Caps de colla** (email/password login): per-colla dashboard — registered people (view/delete/Excel, **Pagament checkbox per person + registered/paid counters**), per-colla T&C PDF upload, **Comandes** (order supplies from the admin-managed catalog, with history), and **Publicacions** (title/message/link/image posts to the colla page; YouTube links render as embedded players; posts can be pinned on top).
+- **Caps de colla** (email/password login): per-colla dashboard — registered people (view/delete/Excel, **Pagament checkbox per person + registered/paid counters**, T&C-accepted status column), per-colla T&C PDF upload, **Comandes** (order supplies from the admin-managed catalog, with history), and **Publicacions** (title/message/link/image posts to the colla page; YouTube links render as embedded players; posts can be pinned on top).
 - **Admins** (`marna96@gmail.com`, `said@magmamedia.cat`, hardcoded in rules): manage caps (creation sends a set-password email; no passwords stored anywhere), colles (6-char code generation, cap assignment), all registrations, the services catalog, and all orders with aggregated shopping-list totals + two-sheet Excel export.
 - Role routing on login: `admins/{email}` → admin, else `caps/{email}` → cap, else `users/{email}` → member, else sign-out. The login page has a self-service "Has oblidat la contrasenya?" reset link.
 
@@ -60,6 +60,9 @@ Git is the source of truth for everything.
 - Legacy composite index `registrations(collaCode, timestamp)` still exists in console; delete after a few days (stale cached frontends).
 
 ## Changelog
+
+### 2026-07-05 (5th pass) — T&C status column in the cap table
+- Cap registrations table shows "✅ Sí / ⏳ Pendent" per person from `tcAccepted`; cap Excel export gained a "T&C acceptats" column (the admin export already had one). Frontend-only.
 
 ### 2026-07-05 (4th pass) — Deferred T&C, pinned posts, post images + YouTube — **rules deploy pending**
 - **Deferred T&C acceptance**: colles without an uploaded T&C no longer show the `docs/terms.html` placeholder. Registration skips the terms screen, writes `tcAccepted: false` + profile `tcPending: true`, shows an info note on the success screen, and `routeUser()` prompts the member to scroll-accept at login once the colla has a `pdfUrl` (terms view reused in `termsMode = 'acceptance'`; button says "Acceptar"). Rules: `tcAccepted:false` creates allowed only when the colla has no `pdfUrl`; members may update only their own `tcAccepted` → `true`. `loadCollaPdf()` removed. Cap PDF card copy explains pending registrations.

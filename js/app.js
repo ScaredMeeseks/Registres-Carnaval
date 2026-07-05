@@ -747,6 +747,7 @@
           <td>${escapeHtml(d.email)}</td>
           <td>${escapeHtml(d.phone)}</td>
           <td><input type="checkbox" class="reg-paid" data-id="${doc.id}" ${d.paid ? 'checked' : ''} title="Pagament"></td>
+          <td>${d.tcAccepted ? '✅ Sí' : '⏳ Pendent'}</td>
           <td>${formatTimestamp(d.timestamp)}</td>
           <td><button class="btn btn-danger btn-small btn-delete-reg" data-id="${doc.id}">Eliminar</button></td>
         `;
@@ -938,6 +939,7 @@
           'Correu': d.email,
           'Telèfon': d.phone,
           'Pagament': d.paid ? 'Sí' : 'No',
+          'T&C acceptats': d.tcAccepted ? 'Sí' : 'No',
           'Colla': d.collaName || '',
           'Data registre': formatTimestamp(d.timestamp)
         };
