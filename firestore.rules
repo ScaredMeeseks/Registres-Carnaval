@@ -46,6 +46,8 @@ service cloud.firestore {
     // Member profiles — doc ID is the member's email. Created at signup
     // (or backfilled by migration v2 from legacy registrations). Only
     // name/colla data lives here; DNI/phone stay in registrations.
+    // tcPending marks members who registered before their colla published
+    // its T&C — they are prompted to accept at login.
     match /users/{email} {
       allow create: if (isAdmin() ||
           (request.auth != null && request.auth.token.email == email))
@@ -53,7 +55,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(
           ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt'])
         && request.resource.data.keys().hasOnly(
-          ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt'])
+          ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt', 'tcPending'])
         && request.resource.data.collaId is string
         && exists(/databases/$(database)/documents/colles/$(request.resource.data.collaId));
       allow read: if isAdmin()
@@ -65,7 +67,7 @@ service cloud.firestore {
         (request.auth != null && request.auth.token.email == email
          && request.resource.data.collaId == resource.data.collaId
          && request.resource.data.keys().hasOnly(
-          ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt']));
+          ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt', 'tcPending']));
       allow delete: if isAdmin() || capOwnsColla(resource.data.collaId);
     }
 
@@ -81,7 +83,9 @@ service cloud.firestore {
     }
 
     // Registrations — created by the participant's own account in a single
-    // write after T&C acceptance; managed by admins and the owning colla's caps
+    // write; tcAccepted may be false only while the colla has not published
+    // its T&C (the member accepts later, at login). Managed by admins and
+    // the owning colla's caps.
     match /registrations/{regId} {
       allow create: if request.auth != null
         && request.resource.data.email == request.auth.token.email
@@ -91,10 +95,18 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(
           ['name', 'surname', 'idNumber', 'email', 'phone',
            'collaCode', 'collaName', 'collaId', 'tcAccepted', 'timestamp'])
-        && request.resource.data.tcAccepted == true
+        && request.resource.data.tcAccepted is bool
         && request.resource.data.collaId is string
-        && exists(/databases/$(database)/documents/colles/$(request.resource.data.collaId));
-      allow read, update, delete: if isAdmin() || capOwnsColla(resource.data.collaId);
+        && exists(/databases/$(database)/documents/colles/$(request.resource.data.collaId))
+        && (request.resource.data.tcAccepted == true
+            || !('pdfUrl' in get(/databases/$(database)/documents/colles/$(request.resource.data.collaId)).data));
+      allow read, delete: if isAdmin() || capOwnsColla(resource.data.collaId);
+      // Members may flip their own pending T&C acceptance to true — nothing else
+      allow update: if isAdmin() || capOwnsColla(resource.data.collaId)
+        || (request.auth != null
+            && request.auth.token.email == resource.data.email
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tcAccepted'])
+            && request.resource.data.tcAccepted == true);
     }
 
     // Services — catalog of orderable items, managed by admins
@@ -120,14 +132,15 @@ service cloud.firestore {
         && request.resource.data.collaId == resource.data.collaId;
     }
 
-    // Posts — colla-page content published by caps (messages/links)
+    // Posts — colla-page content published by caps (messages/links/images)
     match /posts/{postId} {
       allow create: if (isAdmin() || capOwnsColla(request.resource.data.collaId))
         && request.resource.data.authorEmail == request.auth.token.email
         && request.resource.data.keys().hasAll(
           ['collaId', 'title', 'authorEmail', 'createdAt'])
         && request.resource.data.keys().hasOnly(
-          ['collaId', 'title', 'body', 'url', 'authorEmail', 'createdAt']);
+          ['collaId', 'title', 'body', 'url', 'authorEmail', 'createdAt',
+           'pinned', 'imageUrl', 'imagePath']);
       allow read: if isAdmin()
         || capOwnsColla(resource.data.collaId)
         || isMemberOfColla(resource.data.collaId);

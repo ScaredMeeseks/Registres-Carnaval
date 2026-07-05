@@ -18,6 +18,7 @@
   let pendingRegistration = null;   // temp object before T&C
   let pendingPassword = null;       // account password during signup — memory only, never written
   let registrationInProgress = false; // suppress auth routing while signup docs are written
+  let termsMode = 'signup';         // 'signup' | 'acceptance' (deferred T&C at login)
   let capColles = [];               // colles assigned to current cap
   let servicesCache = [];           // orderable services catalog (caps + admin)
   let capActiveCollaId = null;      // colla selected in the cap dashboard tabs
@@ -218,11 +219,28 @@
     $('#btn-confirm-submit').addEventListener('click', async () => {
       if (!pendingRegistration) return;
       showLoading();
-      // Load the colla's custom PDF if it exists — nothing is written to
-      // Firestore until the T&C are accepted
-      await loadCollaPdf(currentCollaId);
-      showView('view-terms');
-      resetTermsView();
+      try {
+        const collaDoc = await db.collection('colles').doc(currentCollaId).get();
+        const colla = collaDoc.exists ? collaDoc.data() : null;
+        if (colla && colla.pdfUrl) {
+          // Colla has published T&C — scroll-accept before anything is written
+          $('#terms-pdf').src = colla.pdfUrl;
+          termsMode = 'signup';
+          $('#btn-terms-save').textContent = 'Desar';
+          showView('view-terms');
+          resetTermsView();
+        } else {
+          // No T&C published yet — register now; the member will be prompted
+          // to accept at login once the colla uploads its document
+          const reg = pendingRegistration;
+          pendingRegistration = null; // guard against double-click double writes
+          const ok = await completeRegistration(reg, false);
+          if (!ok) pendingRegistration = reg; // restore so the user can retry
+        }
+      } catch (e) {
+        toast('Error de connexió. Torna-ho a provar.', 'error');
+        console.error(e);
+      }
       hideLoading();
     });
   }
@@ -265,87 +283,143 @@
     });
 
     btnSave.addEventListener('click', async () => {
+      if (!checkbox.checked) return;
+
+      // Acceptance mode: an existing member accepting newly published T&C
+      if (termsMode === 'acceptance') {
+        await acceptPendingTerms();
+        return;
+      }
+
+      // Signup mode: finish the registration
       const reg = pendingRegistration;
-      if (!checkbox.checked || !reg) return;
+      if (!reg) return;
       pendingRegistration = null; // guard against double-click double writes
       showLoading();
-      // Account creation fires onAuthStateChanged before the profile docs
-      // exist — the listener must not route (and sign out) mid-signup
-      registrationInProgress = true;
-      try {
-        // 1. Create the Auth account (skip when retrying after a partial failure)
-        if (!auth.currentUser || (auth.currentUser.email || '').toLowerCase() !== reg.email) {
-          await auth.createUserWithEmailAndPassword(reg.email, pendingPassword);
-        }
-
-        // 2. A profile with a regId means this person is already registered
-        //    (backfilled legacy registration) — link the account, don't duplicate
-        const profileRef = db.collection('users').doc(reg.email);
-        const profileSnap = await profileRef.get();
-        const existing = profileSnap.exists ? profileSnap.data() : null;
-
-        if (existing && existing.regId) {
-          await profileRef.set({ name: reg.name, surname: reg.surname }, { merge: true });
-          if (existing.collaId !== reg.collaId) {
-            toast(`Aquest correu ja estava registrat a la colla "${existing.collaName || existing.collaCode || ''}". El compte s'ha vinculat a aquella colla.`, 'info');
-          }
-        } else {
-          const regDoc = await db.collection('registrations').add({
-            ...reg,
-            tcAccepted: true,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          await profileRef.set({
-            email: reg.email,
-            name: reg.name,
-            surname: reg.surname,
-            collaId: reg.collaId,
-            collaCode: reg.collaCode,
-            collaName: reg.collaName,
-            regId: regDoc.id,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        }
-
-        pendingPassword = null;
-        registrationInProgress = false;
-        showView('view-success');
-        $('#register-form').reset();
-      } catch (e) {
-        registrationInProgress = false;
-        pendingRegistration = reg; // restore so the user can retry
-        let msg = 'Error desant. Torna-ho a provar.';
-        if (e.code === 'auth/email-already-in-use') {
-          msg = 'Ja existeix un compte amb aquest correu. Inicia sessió.';
-          showView('view-login'); // the terms view has no way back
-        } else if (e.code === 'auth/weak-password') {
-          msg = 'La contrasenya és massa dèbil (mínim 6 caràcters).';
-        }
-        toast(msg, 'error');
-        console.error(e);
-      }
+      const ok = await completeRegistration(reg, true);
+      if (!ok) pendingRegistration = reg; // restore so the user can retry
       hideLoading();
     });
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  4b. Load colla-specific PDF for T&C
+  //  4b. COMPLETE REGISTRATION — account + registration + profile
   // ═══════════════════════════════════════════════════════════
-  async function loadCollaPdf(collaId) {
-    const iframe = $('#terms-pdf');
-    if (!collaId) { iframe.src = 'docs/terms.html'; return; }
+  // `accepted` is false only when the colla has no published T&C yet:
+  // the registration is written with tcAccepted:false and the profile
+  // gets tcPending:true so login prompts for acceptance later.
+  // Returns true on success, false on failure (caller restores state).
+  async function completeRegistration(reg, accepted) {
+    // Account creation fires onAuthStateChanged before the profile docs
+    // exist — the listener must not route (and sign out) mid-signup
+    registrationInProgress = true;
     try {
-      const collaDoc = await db.collection('colles').doc(collaId).get();
-      const data = collaDoc.data();
-      if (data && data.pdfUrl) {
-        iframe.src = data.pdfUrl;
-      } else {
-        iframe.src = 'docs/terms.html';
+      // 1. Create the Auth account (skip when retrying after a partial failure)
+      if (!auth.currentUser || (auth.currentUser.email || '').toLowerCase() !== reg.email) {
+        await auth.createUserWithEmailAndPassword(reg.email, pendingPassword);
       }
+
+      // 2. A profile with a regId means this person is already registered
+      //    (backfilled legacy registration) — link the account, don't duplicate
+      const profileRef = db.collection('users').doc(reg.email);
+      const profileSnap = await profileRef.get();
+      const existing = profileSnap.exists ? profileSnap.data() : null;
+      let tcDeferred = false; // show the "we'll ask you later" note only when true
+
+      if (existing && existing.regId) {
+        // Legacy registrations were already accepted — nothing deferred here
+        await profileRef.set({ name: reg.name, surname: reg.surname }, { merge: true });
+        if (existing.collaId !== reg.collaId) {
+          toast(`Aquest correu ja estava registrat a la colla "${existing.collaName || existing.collaCode || ''}". El compte s'ha vinculat a aquella colla.`, 'info');
+        }
+      } else {
+        const regDoc = await db.collection('registrations').add({
+          ...reg,
+          tcAccepted: accepted,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        const profile = {
+          email: reg.email,
+          name: reg.name,
+          surname: reg.surname,
+          collaId: reg.collaId,
+          collaCode: reg.collaCode,
+          collaName: reg.collaName,
+          regId: regDoc.id,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if (!accepted) {
+          profile.tcPending = true;
+          tcDeferred = true;
+        }
+        await profileRef.set(profile);
+      }
+
+      pendingPassword = null;
+      registrationInProgress = false;
+      $('#success-tc-note').hidden = !tcDeferred;
+      showView('view-success');
+      $('#register-form').reset();
+      return true;
     } catch (e) {
-      console.warn('Could not load colla PDF, using default:', e);
-      iframe.src = 'docs/terms.html';
+      registrationInProgress = false;
+      let msg = 'Error desant. Torna-ho a provar.';
+      if (e.code === 'auth/email-already-in-use') {
+        msg = 'Ja existeix un compte amb aquest correu. Inicia sessió.';
+        showView('view-login'); // the terms/confirm views have no way back
+      } else if (e.code === 'auth/weak-password') {
+        msg = 'La contrasenya és massa dèbil (mínim 6 caràcters).';
+      }
+      toast(msg, 'error');
+      console.error(e);
+      return false;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  4c. DEFERRED T&C ACCEPTANCE — prompt at login
+  // ═══════════════════════════════════════════════════════════
+  // Shows the terms view in acceptance mode if the member registered
+  // before their colla published its T&C and the document now exists.
+  // Returns true when the prompt was shown (dashboard load is deferred).
+  async function maybePromptPendingTerms(profile) {
+    if (!profile.tcPending || !profile.regId || !profile.collaId) return false;
+    try {
+      const collaDoc = await db.collection('colles').doc(profile.collaId).get();
+      const colla = collaDoc.exists ? collaDoc.data() : null;
+      if (!colla || !colla.pdfUrl) return false; // still nothing to accept
+      termsMode = 'acceptance';
+      $('#terms-pdf').src = colla.pdfUrl;
+      $('#btn-terms-save').textContent = 'Acceptar';
+      showView('view-terms');
+      resetTermsView();
+      return true;
+    } catch (e) {
+      console.warn('Could not check pending terms:', e);
+      return false;
+    }
+  }
+
+  async function acceptPendingTerms() {
+    const profile = currentUserProfile;
+    if (!profile || !profile.regId) return;
+    showLoading();
+    try {
+      // Rules only allow the member to flip their own tcAccepted to true
+      await db.collection('registrations').doc(profile.regId).update({ tcAccepted: true });
+      await db.collection('users').doc(profile.email).update({
+        tcPending: firebase.firestore.FieldValue.delete()
+      });
+      delete currentUserProfile.tcPending;
+      termsMode = 'signup';
+      $('#btn-terms-save').textContent = 'Desar';
+      toast('Termes i Condicions acceptats. Gràcies!', 'success');
+      showUserDashboard();
+    } catch (e) {
+      toast('Error desant l\'acceptació. Torna-ho a provar.', 'error');
+      console.error(e);
+    }
+    hideLoading();
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -479,9 +553,9 @@
     if (profileDoc.exists) {
       currentRole = 'user';
       currentUserProfile = { id: profileDoc.id, ...profileDoc.data() };
-      $('#user-user-label').textContent = currentUserProfile.name || email;
-      showView('view-user-dashboard');
-      loadUserData();
+      // Registered before the colla published its T&C? Prompt now if possible
+      const prompted = await maybePromptPendingTerms(currentUserProfile);
+      if (!prompted) showUserDashboard();
       hideLoading();
       return;
     }
@@ -834,7 +908,7 @@
         status.innerHTML = `✅ Document actual: <strong>${escapeHtml(data.pdfName || 'terms.pdf')}</strong>`;
         removeBtn.hidden = false;
       } else {
-        status.textContent = 'Cap document pujat encara. S\'utilitzarà el document per defecte.';
+        status.textContent = 'Cap document pujat encara. Els nous registres queden pendents d\'acceptar els termes fins que pugis un document (se\'ls demanarà en iniciar sessió).';
         removeBtn.hidden = true;
       }
     } catch (e) {
@@ -1078,23 +1152,38 @@
   // ═══════════════════════════════════════════════════════════
   //  7c. PUBLICACIONS (CAP) — colla-page posts
   // ═══════════════════════════════════════════════════════════
-  // Shared renderer: cap list (with delete) and user feed (read-only)
-  function renderPostsList(container, emptyEl, posts, withDelete) {
+  // Extract the 11-char video id from any YouTube URL form (watch/shorts/embed/youtu.be)
+  function youtubeEmbedId(url) {
+    const m = (url || '').match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/i);
+    return m ? m[1] : null;
+  }
+
+  // Shared renderer: cap list (with pin/delete controls) and user feed (read-only)
+  function renderPostsList(container, emptyEl, posts, withControls) {
     container.innerHTML = '';
     emptyEl.hidden = posts.length > 0;
-    posts.forEach(p => {
+    // Pinned first; the stable sort keeps newest-first order within each group
+    const sorted = [...posts].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    sorted.forEach(p => {
       // Only render http(s) links — anything else is dropped
       const url = (p.url && /^https?:\/\//i.test(p.url)) ? p.url : null;
+      const ytId = url ? youtubeEmbedId(url) : null;
       const card = document.createElement('div');
-      card.className = 'post-card';
+      card.className = 'post-card' + (p.pinned ? ' post-card-pinned' : '');
       card.innerHTML = `
         <div class="post-card-head">
-          <span class="post-card-title">${escapeHtml(p.title)}</span>
+          <span class="post-card-title">${p.pinned ? '📌 ' : ''}${escapeHtml(p.title)}</span>
           <span class="post-card-date">${formatTimestamp(p.createdAt)}</span>
         </div>
         ${p.body ? `<p class="post-card-body">${escapeHtml(p.body)}</p>` : ''}
-        ${url ? `<a class="post-card-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">🔗 ${escapeHtml(url)}</a>` : ''}
-        ${withDelete ? `<div class="post-card-actions"><button class="btn btn-danger btn-small btn-delete-post" data-id="${p.id}">Eliminar</button></div>` : ''}
+        ${p.imageUrl ? `<a href="${escapeHtml(p.imageUrl)}" target="_blank" rel="noopener"><img class="post-card-img" src="${escapeHtml(p.imageUrl)}" alt="" loading="lazy"></a>` : ''}
+        ${ytId
+          ? `<div class="post-card-video"><iframe src="https://www.youtube-nocookie.com/embed/${ytId}" title="YouTube" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`
+          : (url ? `<a class="post-card-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">🔗 ${escapeHtml(url)}</a>` : '')}
+        ${withControls ? `<div class="post-card-actions">
+          <button class="btn btn-outline btn-small btn-pin-post" data-id="${p.id}" data-pinned="${p.pinned ? 1 : 0}">${p.pinned ? 'Desfixar' : '📌 Fixar'}</button>
+          <button class="btn btn-danger btn-small btn-delete-post" data-id="${p.id}">Eliminar</button>
+        </div>` : ''}
       `;
       container.appendChild(card);
     });
@@ -1114,7 +1203,20 @@
     }
   }
 
+  function resetPostForm() {
+    $('#cap-post-form').reset();
+    $('#post-image-input').value = '';
+    $('#post-image-filename').textContent = 'Cap arxiu';
+  }
+
   function initCapPosts() {
+    // Image chooser
+    $('#btn-post-image-choose').addEventListener('click', () => $('#post-image-input').click());
+    $('#post-image-input').addEventListener('change', () => {
+      const file = $('#post-image-input').files[0];
+      $('#post-image-filename').textContent = file ? file.name : 'Cap arxiu';
+    });
+
     $('#cap-post-form').addEventListener('submit', async e => {
       e.preventDefault();
       if (!capActiveCollaId) { toast('Selecciona una colla primer.', 'error'); return; }
@@ -1136,9 +1238,18 @@
         };
         if (body) data.body = body;
         if (url) data.url = url;
+
+        const file = $('#post-image-input').files[0];
+        if (file) {
+          const path = `posts/${capActiveCollaId}/${Date.now()}_${file.name}`;
+          const snapshot = await storage.ref(path).put(file);
+          data.imageUrl = await snapshot.ref.getDownloadURL();
+          data.imagePath = path;
+        }
+
         await db.collection('posts').add(data);
         toast('Publicació creada.', 'success');
-        $('#cap-post-form').reset();
+        resetPostForm();
         loadCapPosts(capActiveCollaId);
       } catch (err) {
         toast('Error creant la publicació.', 'error');
@@ -1147,14 +1258,32 @@
       hideLoading();
     });
 
-    // Delete post (delegated)
+    // Pin/unpin + delete (delegated)
     $('#cap-posts-list').addEventListener('click', async e => {
+      const btnPin = e.target.closest('.btn-pin-post');
+      if (btnPin) {
+        const pinned = btnPin.dataset.pinned !== '1';
+        showLoading();
+        try {
+          await db.collection('posts').doc(btnPin.dataset.id).update({ pinned: pinned });
+          loadCapPosts(capActiveCollaId);
+        } catch (err) {
+          toast('Error fixant la publicació.', 'error');
+          console.error(err);
+        }
+        hideLoading();
+        return;
+      }
+
       const btn = e.target.closest('.btn-delete-post');
       if (!btn) return;
       if (!confirm('Segur que vols eliminar aquesta publicació?')) return;
       showLoading();
       try {
-        await db.collection('posts').doc(btn.dataset.id).delete();
+        const ref = db.collection('posts').doc(btn.dataset.id);
+        const snap = await ref.get();
+        if (snap.exists) await deleteStoredImage(snap.data());
+        await ref.delete();
         toast('Publicació eliminada.', 'success');
         loadCapPosts(capActiveCollaId);
       } catch (err) {
@@ -1168,6 +1297,12 @@
   // ═══════════════════════════════════════════════════════════
   //  7d. USER (MEMBER) DASHBOARD — colla page
   // ═══════════════════════════════════════════════════════════
+  function showUserDashboard() {
+    $('#user-user-label').textContent = currentUserProfile.name || currentUserProfile.email;
+    showView('view-user-dashboard');
+    loadUserData();
+  }
+
   async function loadUserData() {
     const p = currentUserProfile;
     if (!p || !p.collaId) return;
@@ -1698,7 +1833,7 @@
         if (editingServiceId) {
           // Replacing the image? Delete the old file best-effort
           const old = servicesCache.find(s => s.id === editingServiceId);
-          if (file && old) await deleteServiceImage(old);
+          if (file && old) await deleteStoredImage(old);
           await db.collection('services').doc(editingServiceId).update(data);
           toast('Servei actualitzat.', 'success');
         } else {
@@ -1741,7 +1876,7 @@
       showLoading();
       try {
         const s = servicesCache.find(x => x.id === btnDel.dataset.id);
-        if (s) await deleteServiceImage(s);
+        if (s) await deleteStoredImage(s);
         await db.collection('services').doc(btnDel.dataset.id).delete();
         toast('Servei eliminat.', 'success');
         if (editingServiceId === btnDel.dataset.id) resetServiceForm();
@@ -1755,12 +1890,14 @@
     });
   }
 
-  async function deleteServiceImage(service) {
+  // Best-effort Storage cleanup for any doc carrying imagePath/imageUrl
+  // (services and posts)
+  async function deleteStoredImage(doc) {
     try {
-      if (service.imagePath) {
-        await storage.ref(service.imagePath).delete();
-      } else if (service.imageUrl) {
-        await storage.refFromURL(service.imageUrl).delete(); // legacy docs
+      if (doc.imagePath) {
+        await storage.ref(doc.imagePath).delete();
+      } else if (doc.imageUrl) {
+        await storage.refFromURL(doc.imageUrl).delete(); // legacy docs
       }
     } catch (e) { /* image may already be gone */ }
   }

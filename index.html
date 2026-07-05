@@ -140,6 +140,7 @@
         <div class="success-icon">✅</div>
         <h1 style="margin:.8rem 0;">Tot fet!</h1>
         <p class="subtitle" style="margin-bottom:1.5rem;">El teu registre i el teu compte s'han creat correctament.</p>
+        <p id="success-tc-note" class="tc-note" hidden>ℹ️ La teva colla encara no ha publicat els Termes i Condicions. Te'ls demanarem quan iniciïs sessió un cop estiguin disponibles.</p>
         <button id="btn-success-home" class="btn btn-primary btn-full">Anar a la pàgina de la colla</button>
       </div>
     </div>
@@ -288,8 +289,16 @@
               <textarea id="post-body" rows="4" maxlength="2000"></textarea>
             </div>
             <div class="form-group">
-              <label for="post-url">Enllaç (opcional)</label>
+              <label for="post-url">Enllaç (opcional) — els enllaços de YouTube es mostren com a vídeo</label>
               <input type="url" id="post-url" placeholder="https://...">
+            </div>
+            <div class="form-group">
+              <label>Imatge (opcional)</label>
+              <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+                <input type="file" id="post-image-input" accept="image/*" hidden>
+                <button type="button" id="btn-post-image-choose" class="btn btn-outline btn-small">📂 Imatge...</button>
+                <span id="post-image-filename" style="font-size:.82rem;color:var(--text-secondary);">Cap arxiu</span>
+              </div>
             </div>
             <button type="submit" class="btn btn-primary">Publicar</button>
           </form>

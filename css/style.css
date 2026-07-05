@@ -451,7 +451,27 @@ a:hover { text-decoration: underline; }
 .post-card-date { font-size: .78rem; color: var(--text-secondary); white-space: nowrap; }
 .post-card-body { font-size: .9rem; white-space: pre-line; margin-bottom: .3rem; }
 .post-card-link { font-size: .88rem; word-break: break-all; }
-.post-card-actions { margin-top: .5rem; text-align: right; }
+.post-card-actions { margin-top: .5rem; display: flex; gap: .5rem; justify-content: flex-end; }
+.post-card-pinned { border-left: 4px solid var(--accent); }
+.post-card-img {
+  display: block; max-width: 100%; max-height: 340px;
+  border-radius: 8px; margin: .4rem 0;
+}
+.post-card-video {
+  position: relative; width: 100%; max-width: 560px;
+  aspect-ratio: 16 / 9; margin: .4rem 0;
+}
+.post-card-video iframe {
+  width: 100%; height: 100%; border: 0; border-radius: 8px;
+}
+
+.tc-note {
+  background: #e3f2fd; color: #1565c0;
+  border: 1px solid #90caf9; border-radius: var(--radius);
+  padding: .7rem .9rem; font-size: .85rem;
+  margin-bottom: 1.2rem; text-align: left;
+}
+.tc-note[hidden] { display: none; }
 
 .members-list {
   list-style: none;
