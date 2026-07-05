@@ -15,6 +15,16 @@ _Rolling document, overwritten each session. Last updated: 2026-07-05._
 - `app.js`: removed hardcoded admin credentials and seeding; registration is now a single write after T&C acceptance (terms listeners made one-time to avoid duplicate writes); caps re-keyed by email; cap onboarding via password-reset email (no stored passwords); resend-email button in admin caps table; cap queries switched to `collaId`; one-time `runMigrations()` (marker `meta/migrations`, v1).
 - Updated CLAUDE.md to match.
 
+## Comandes feature rebuilt (2026-07-05, later same day)
+
+The lost orders feature (data survived in `orders`/`services`) was rebuilt: cap dashboard has a Registres/Comandes sub-nav (catalog with quantities + prices + total, order history per colla); admin gets Serveis (catalog CRUD with image upload) and Comandes (all orders, per-colla filter, shopping-list totals, two-sheet Excel export) tabs. Rules added for both collections (`orders` scoped via `capOwnsColla`, `services` admin-write/authed-read; Storage `services/` images admin-write/public-read).
+
+**Its deploy steps (pending until done):**
+1. Cloud Shell data cleanup snippet: delete test order `UQxNkZ9zcy3XPhf7cUf6`, strip `link` + convert string `price`→number on the 4 services.
+2. `cd ~/Registres-Carnaval && git pull && firebase use registre-carnaval` (verify!) `&& firebase deploy --only firestore:rules,storage`.
+3. Create composite index **orders (collaId ASC, createdAt DESC)** via console error link or manually.
+4. Test as cap (darnabar) + admin per CLAUDE.md.
+
 ## Pending / notes
 
 - **Said's admin password** (`said@magmamedia.cat`) still needs changing — it shared the leaked `Garriguella2026`. Reset email or the Admin SDK snippet from this session.

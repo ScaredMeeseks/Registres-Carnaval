@@ -62,6 +62,29 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin() || capOwnsColla(resource.data.collaId);
     }
 
+    // Services — catalog of orderable items, managed by admins
+    match /services/{serviceId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    // Orders — supply orders placed by caps for their own colla
+    match /orders/{orderId} {
+      allow create: if (isAdmin() ||
+          (capOwnsColla(request.resource.data.collaId) &&
+           request.resource.data.capEmail == request.auth.token.email))
+        && request.resource.data.keys().hasAll(
+          ['collaId', 'collaCode', 'collaName', 'capEmail', 'items', 'total', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(
+          ['collaId', 'collaCode', 'collaName', 'capEmail', 'items', 'total', 'createdAt', 'updatedAt'])
+        && request.resource.data.items is list
+        && request.resource.data.total is number;
+      allow read, delete: if isAdmin() || capOwnsColla(resource.data.collaId);
+      // Orders can't be moved to another colla
+      allow update: if (isAdmin() || capOwnsColla(resource.data.collaId))
+        && request.resource.data.collaId == resource.data.collaId;
+    }
+
     // Meta — migration markers etc.
     match /meta/{docId} {
       allow read, write: if isAdmin();

@@ -18,7 +18,7 @@ Git is the source of truth for everything.
   git pull            # (first time: git clone https://github.com/ScaredMeeseks/Registres-Carnaval.git)
   firebase deploy --only firestore:rules,storage
   ```
-  `firebase.json` deliberately configures **only rules** — no hosting (GitHub Pages does that) and no indexes file (indexes are managed in the console; a composite index on registrations `(collaId asc, timestamp desc)` must exist).
+  `firebase.json` deliberately configures **only rules** — no hosting (GitHub Pages does that) and no indexes file (indexes are managed in the console; composite indexes that must exist: registrations `(collaId asc, timestamp desc)` and orders `(collaId asc, createdAt desc)`).
   **Before every deploy**: run `firebase use` and confirm it says `registre-carnaval`, then read the `=== Deploying to '...'` header. The CLI's remembered active project can override `.firebaserc` — on 2026-07-05 a deploy from this repo landed on `mundial2026-ec8e7` and wiped that project's rules. The `(project)` in the Cloud Shell prompt is gcloud's, not the Firebase CLI's.
 - **Firebase project**: `registre-carnaval` (config in `js/firebase-config.js`). Firestore + Auth + Storage.
 - Never edit rules directly in the Firebase Console — change the repo files and deploy.
@@ -43,6 +43,8 @@ External CDN deps in `index.html`: Firebase compat SDKs, SheetJS (`XLSX`) for Ex
 | `caps/{email}` | `{ email, name, createdAt }` | **Doc ID = email** (rules depend on this). No passwords stored |
 | `colles/{autoId}` | `{ name, code, capEmails: [], pdfUrl?, pdfName?, createdAt }` | `code` is unique 6-char (no ambiguous chars). `capEmails` array links caps |
 | `registrations/{autoId}` | `{ name, surname, idNumber, email, phone, collaCode, collaName, collaId, tcAccepted, timestamp }` | Written once, after T&C acceptance; `collaId` is what rules and cap-dashboard queries key on |
+| `services/{autoId}` | `{ name, price: number, unit, category, imageUrl?, imagePath?, link?, createdAt }` | Orderable catalog, admin-managed; images in Storage `services/`. Legacy docs may lack `imagePath` (delete falls back to `refFromURL`) |
+| `orders/{autoId}` | `{ collaId, collaCode, collaName, capEmail, items: [{serviceId, serviceName, unitPrice, unit, category, quantity}], total, createdAt, updatedAt }` | Multiple per colla; items snapshot the price at order time. Rules scope by `collaId` like registrations |
 | `meta/{docId}` | `{ v, ranAt }` | Migration markers (admin-only) |
 
 ### Roles & security model
@@ -58,6 +60,7 @@ External CDN deps in `index.html`: Firebase compat SDKs, SheetJS (`XLSX`) for Ex
 - **T&C gating**: checkbox stays disabled until the iframe container is scrolled to bottom (20px tolerance). Per-colla custom PDF (`colles.pdfUrl`, uploaded to Storage `terms/{collaId}/`) overrides the default `docs/terms.html`. Listener setup is one-time (`initTerms()`); per-entry reset is `resetTermsView()` — **do not re-attach listeners per registration** (stacked handlers would create duplicate docs).
 - **Migrations**: `runMigrations()` runs on admin login, guarded by the `meta/migrations` marker. v1 re-keyed caps by email (dropping `plainPassword`) and backfilled `collaId` on registrations. Bump `v` for future one-time migrations.
 - **Registrations queries** use `where('collaId','==',…).orderBy('timestamp','desc')` — requires the composite index noted above.
+- **Comandes (orders)**: cap dashboard has a Registres/Comandes sub-nav. Caps build an order from the services catalog (`servicesCache`, loaded once per session, sorted client-side — no index) and submit; own-colla history queries `where('collaId','==',…).orderBy('createdAt','desc')` (composite index). Admin manages the catalog (Serveis tab; images uploaded to Storage `services/` with `imagePath` stored for deletion) and sees all orders + aggregated shopping-list totals with a two-sheet Excel export (Comandes tab).
 
 ## Conventions
 

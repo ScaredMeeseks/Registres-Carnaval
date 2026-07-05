@@ -16,6 +16,10 @@
   let currentCollaId = null;        // Firestore doc id of selected colla
   let pendingRegistration = null;   // temp object before T&C
   let capColles = [];               // colles assigned to current cap
+  let servicesCache = [];           // orderable services catalog (caps + admin)
+  let capActiveCollaId = null;      // colla selected in the cap dashboard tabs
+  let adminOrdersCache = [];        // all orders, for admin filtering/export
+  let editingServiceId = null;      // service being edited in the admin form
 
   // ─── View switching ─────────────────────────────────────────
   function showView(id) {
@@ -465,8 +469,12 @@
 
       // Render colla tabs
       renderCollaTabs();
-      // Load registrations for the first colla by default
-      await loadCapRegistrations(capColles[0].id);
+      capActiveCollaId = capColles[0].id;
+      // Load registrations + orders for the first colla by default
+      await loadServices();
+      renderOrderCatalog();
+      await loadCapRegistrations(capActiveCollaId);
+      loadCapOrders(capActiveCollaId);
     } catch (e) {
       toast('Error carregant dades.', 'error');
       console.error(e);
@@ -486,7 +494,9 @@
       btn.addEventListener('click', () => {
         $$('.colla-tab').forEach(t => t.classList.remove('active'));
         btn.classList.add('active');
+        capActiveCollaId = colla.id;
         loadCapRegistrations(colla.id);
+        loadCapOrders(colla.id);
         updatePdfStatus(colla.id);
       });
       container.appendChild(btn);
@@ -694,6 +704,191 @@
       console.error(e);
     }
     hideLoading();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  7b. COMANDES (CAP) — service catalog + orders
+  // ═══════════════════════════════════════════════════════════
+  const CATEGORY_LABELS = { menjar: '🍖 Menjar', beguda: '🍹 Beguda', gel: '🧊 Gel', altres: '📦 Altres' };
+
+  function categoryLabel(cat) {
+    return CATEGORY_LABELS[cat] || cat || '📦 Altres';
+  }
+
+  async function loadServices() {
+    try {
+      const snap = await db.collection('services').get();
+      servicesCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      servicesCache.sort((a, b) =>
+        (a.category || '').localeCompare(b.category || '') ||
+        (a.name || '').localeCompare(b.name || ''));
+    } catch (e) {
+      console.error('Error loading services:', e);
+    }
+  }
+
+  function renderOrderCatalog() {
+    const container = $('#cap-service-catalog');
+    container.innerHTML = '';
+    if (servicesCache.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-secondary);font-size:.9rem;">No hi ha serveis disponibles.</p>';
+      updateOrderTotal();
+      return;
+    }
+    let grid = null, lastCat = null;
+    servicesCache.forEach(s => {
+      if (s.category !== lastCat) {
+        lastCat = s.category;
+        const h = document.createElement('h3');
+        h.className = 'service-category-title';
+        h.textContent = categoryLabel(s.category);
+        container.appendChild(h);
+        grid = document.createElement('div');
+        grid.className = 'service-grid';
+        container.appendChild(grid);
+      }
+      const price = Number(s.price) || 0;
+      const card = document.createElement('div');
+      card.className = 'service-card';
+      card.innerHTML = `
+        ${s.imageUrl
+          ? `<img src="${escapeHtml(s.imageUrl)}" alt="" class="service-card-img">`
+          : '<div class="service-card-img service-card-img-placeholder">🛒</div>'}
+        <div class="service-card-name">${escapeHtml(s.name)}</div>
+        <div class="service-card-price">${price.toFixed(2)} € / ${escapeHtml(s.unit || 'unitat')}</div>
+        <input type="number" class="service-qty" data-service-id="${s.id}" min="0" step="1" value="0">
+      `;
+      grid.appendChild(card);
+    });
+    updateOrderTotal();
+  }
+
+  function collectOrderItems() {
+    const items = [];
+    $$('.service-qty').forEach(inp => {
+      const qty = parseInt(inp.value, 10) || 0;
+      if (qty <= 0) return;
+      const s = servicesCache.find(x => x.id === inp.dataset.serviceId);
+      if (!s) return;
+      items.push({
+        serviceId: s.id,
+        serviceName: s.name,
+        unitPrice: Number(s.price) || 0,
+        unit: s.unit || 'unitat',
+        category: s.category || '',
+        quantity: qty
+      });
+    });
+    return items;
+  }
+
+  function updateOrderTotal() {
+    const total = collectOrderItems().reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+    $('#cap-order-total').textContent = total.toFixed(2) + ' €';
+  }
+
+  async function submitCapOrder() {
+    if (!capActiveCollaId) { toast('Selecciona una colla primer.', 'error'); return; }
+    const items = collectOrderItems();
+    if (items.length === 0) { toast('Afegeix alguna quantitat primer.', 'error'); return; }
+    const colla = capColles.find(c => c.id === capActiveCollaId);
+    const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+
+    showLoading();
+    try {
+      await db.collection('orders').add({
+        collaId: capActiveCollaId,
+        collaCode: colla ? colla.code : '',
+        collaName: colla ? colla.name : '',
+        capEmail: currentUser.email.toLowerCase(),
+        items: items,
+        total: Math.round(total * 100) / 100,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      toast('Comanda enviada!', 'success');
+      renderOrderCatalog(); // resets quantities to 0
+      loadCapOrders(capActiveCollaId);
+    } catch (e) {
+      toast('Error enviant la comanda.', 'error');
+      console.error(e);
+    }
+    hideLoading();
+  }
+
+  function orderItemsSummary(items) {
+    return (items || []).map(it => `${it.quantity}× ${it.serviceName}`).join(', ');
+  }
+
+  async function loadCapOrders(collaId) {
+    const tbody = $('#cap-orders-body');
+    const empty = $('#cap-orders-empty');
+    tbody.innerHTML = '';
+
+    try {
+      const snap = await db.collection('orders')
+        .where('collaId', '==', collaId)
+        .orderBy('createdAt', 'desc')
+        .get();
+
+      if (snap.empty) { empty.hidden = false; return; }
+      empty.hidden = true;
+
+      snap.docs.forEach(doc => {
+        const d = doc.data();
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${formatTimestamp(d.createdAt)}</td>
+          <td>${escapeHtml(orderItemsSummary(d.items))}</td>
+          <td>${(Number(d.total) || 0).toFixed(2)} €</td>
+          <td><button class="btn btn-danger btn-small btn-delete-order" data-id="${doc.id}">Eliminar</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    } catch (e) {
+      toast('Error carregant comandes.', 'error');
+      console.error(e);
+    }
+  }
+
+  function initCapOrders() {
+    // Sub-nav: Registres / Comandes
+    const btnReg = $('#btn-cap-tab-registres');
+    const btnCom = $('#btn-cap-tab-comandes');
+    btnReg.addEventListener('click', () => {
+      btnReg.classList.add('active'); btnCom.classList.remove('active');
+      $('#cap-section-registres').hidden = false;
+      $('#cap-section-comandes').hidden = true;
+    });
+    btnCom.addEventListener('click', () => {
+      btnCom.classList.add('active'); btnReg.classList.remove('active');
+      $('#cap-section-registres').hidden = true;
+      $('#cap-section-comandes').hidden = false;
+    });
+
+    // Live total while typing quantities (delegated)
+    $('#cap-service-catalog').addEventListener('input', e => {
+      if (e.target.classList.contains('service-qty')) updateOrderTotal();
+    });
+
+    $('#btn-cap-order-submit').addEventListener('click', submitCapOrder);
+
+    // Delete own order (delegated)
+    $('#cap-orders-body').addEventListener('click', async e => {
+      const btn = e.target.closest('.btn-delete-order');
+      if (!btn) return;
+      if (!confirm('Segur que vols eliminar aquesta comanda?')) return;
+      showLoading();
+      try {
+        await db.collection('orders').doc(btn.dataset.id).delete();
+        toast('Comanda eliminada.', 'success');
+        loadCapOrders(capActiveCollaId);
+      } catch (err) {
+        toast('Error eliminant la comanda.', 'error');
+        console.error(err);
+      }
+      hideLoading();
+    });
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -927,7 +1122,13 @@
   }
 
   async function loadAdminData() {
-    await Promise.all([loadAdminCaps(), loadAdminColles(), loadAdminRegistrations()]);
+    await Promise.all([
+      loadAdminCaps(),
+      loadAdminColles(),
+      loadAdminRegistrations(),
+      loadServices().then(renderAdminServices),
+      loadAdminOrders()
+    ]);
   }
 
   async function loadAdminCaps() {
@@ -1094,6 +1295,312 @@
     hideLoading();
   }
 
+  // ═══════════════════════════════════════════════════════════
+  //  9. ADMIN — SERVEIS (catalog CRUD)
+  // ═══════════════════════════════════════════════════════════
+  function renderAdminServices() {
+    const tbody = $('#admin-services-body');
+    const empty = $('#admin-services-empty');
+    tbody.innerHTML = '';
+
+    if (servicesCache.length === 0) { empty.hidden = false; return; }
+    empty.hidden = true;
+
+    servicesCache.forEach(s => {
+      const price = Number(s.price) || 0;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${s.imageUrl ? `<img src="${escapeHtml(s.imageUrl)}" alt="" class="service-thumb">` : '🛒'}</td>
+        <td>${escapeHtml(s.name)}${s.link ? ` <a href="${escapeHtml(s.link)}" target="_blank" rel="noopener" title="Enllaç">🔗</a>` : ''}</td>
+        <td>${escapeHtml(categoryLabel(s.category))}</td>
+        <td>${price.toFixed(2)} € / ${escapeHtml(s.unit || 'unitat')}</td>
+        <td>
+          <button class="btn btn-outline btn-small btn-edit-service" data-id="${s.id}">Editar</button>
+          <button class="btn btn-danger btn-small btn-delete-service" data-id="${s.id}">Eliminar</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function resetServiceForm() {
+    editingServiceId = null;
+    $('#service-form').reset();
+    $('#service-image-input').value = '';
+    $('#service-image-filename').textContent = 'Cap arxiu';
+    $('#service-form-title').textContent = 'Afegir Servei';
+    $('#btn-service-save').textContent = 'Desar';
+    $('#btn-service-cancel').hidden = true;
+  }
+
+  function initAdminServices() {
+    // Image chooser
+    $('#btn-service-image-choose').addEventListener('click', () => $('#service-image-input').click());
+    $('#service-image-input').addEventListener('change', () => {
+      const file = $('#service-image-input').files[0];
+      $('#service-image-filename').textContent = file ? file.name : 'Cap arxiu';
+    });
+
+    $('#btn-service-cancel').addEventListener('click', resetServiceForm);
+
+    // Create / update
+    $('#service-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const name = $('#service-name').value.trim();
+      const price = parseFloat($('#service-price').value);
+      const unit = $('#service-unit').value;
+      const category = $('#service-category').value;
+      const link = $('#service-link').value.trim();
+      if (!name || isNaN(price) || price < 0) { toast('Revisa el nom i el preu.', 'error'); return; }
+
+      showLoading();
+      try {
+        const data = { name, price, unit, category };
+        if (link) data.link = link; else if (editingServiceId) data.link = firebase.firestore.FieldValue.delete();
+
+        // Upload new image if one was chosen
+        const file = $('#service-image-input').files[0];
+        if (file) {
+          const path = `services/${Date.now()}_${file.name}`;
+          const snapshot = await storage.ref(path).put(file);
+          data.imageUrl = await snapshot.ref.getDownloadURL();
+          data.imagePath = path;
+        }
+
+        if (editingServiceId) {
+          // Replacing the image? Delete the old file best-effort
+          const old = servicesCache.find(s => s.id === editingServiceId);
+          if (file && old) await deleteServiceImage(old);
+          await db.collection('services').doc(editingServiceId).update(data);
+          toast('Servei actualitzat.', 'success');
+        } else {
+          data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+          await db.collection('services').add(data);
+          toast('Servei afegit.', 'success');
+        }
+        resetServiceForm();
+        await loadServices();
+        renderAdminServices();
+      } catch (err) {
+        toast('Error desant el servei.', 'error');
+        console.error(err);
+      }
+      hideLoading();
+    });
+
+    // Edit / delete (delegated)
+    $('#admin-services-body').addEventListener('click', async e => {
+      const btnEdit = e.target.closest('.btn-edit-service');
+      if (btnEdit) {
+        const s = servicesCache.find(x => x.id === btnEdit.dataset.id);
+        if (!s) return;
+        editingServiceId = s.id;
+        $('#service-name').value = s.name || '';
+        $('#service-price').value = Number(s.price) || 0;
+        $('#service-unit').value = s.unit || 'unitat';
+        $('#service-category').value = CATEGORY_LABELS[s.category] ? s.category : 'altres';
+        $('#service-link').value = s.link || '';
+        $('#service-image-filename').textContent = s.imageUrl ? '(imatge actual)' : 'Cap arxiu';
+        $('#service-form-title').textContent = 'Editar Servei';
+        $('#btn-service-save').textContent = 'Actualitzar';
+        $('#btn-service-cancel').hidden = false;
+        window.scrollTo(0, 0);
+        return;
+      }
+      const btnDel = e.target.closest('.btn-delete-service');
+      if (!btnDel) return;
+      if (!confirm('Segur que vols eliminar aquest servei?')) return;
+      showLoading();
+      try {
+        const s = servicesCache.find(x => x.id === btnDel.dataset.id);
+        if (s) await deleteServiceImage(s);
+        await db.collection('services').doc(btnDel.dataset.id).delete();
+        toast('Servei eliminat.', 'success');
+        if (editingServiceId === btnDel.dataset.id) resetServiceForm();
+        await loadServices();
+        renderAdminServices();
+      } catch (err) {
+        toast('Error eliminant el servei.', 'error');
+        console.error(err);
+      }
+      hideLoading();
+    });
+  }
+
+  async function deleteServiceImage(service) {
+    try {
+      if (service.imagePath) {
+        await storage.ref(service.imagePath).delete();
+      } else if (service.imageUrl) {
+        await storage.refFromURL(service.imageUrl).delete(); // legacy docs
+      }
+    } catch (e) { /* image may already be gone */ }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  10. ADMIN — COMANDES (orders overview + totals)
+  // ═══════════════════════════════════════════════════════════
+  function filteredAdminOrders() {
+    const collaId = $('#admin-orders-colla-filter').value;
+    return collaId ? adminOrdersCache.filter(o => o.collaId === collaId) : adminOrdersCache;
+  }
+
+  async function loadAdminOrders() {
+    try {
+      const snap = await db.collection('orders').orderBy('createdAt', 'desc').get();
+      adminOrdersCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Colla filter options (from the orders themselves)
+      const select = $('#admin-orders-colla-filter');
+      const current = select.value;
+      const seen = {};
+      select.innerHTML = '<option value="">Totes les colles</option>';
+      adminOrdersCache.forEach(o => {
+        if (!o.collaId || seen[o.collaId]) return;
+        seen[o.collaId] = true;
+        const opt = document.createElement('option');
+        opt.value = o.collaId;
+        opt.textContent = o.collaName || o.collaCode || o.collaId;
+        select.appendChild(opt);
+      });
+      select.value = seen[current] ? current : '';
+
+      renderAdminOrders();
+    } catch (e) {
+      console.error('Error loading orders:', e);
+    }
+  }
+
+  function renderAdminOrders() {
+    const orders = filteredAdminOrders();
+
+    // Orders table (each row followed by a hidden per-item detail row)
+    const tbody = $('#admin-orders-body');
+    const empty = $('#admin-orders-empty');
+    tbody.innerHTML = '';
+    empty.hidden = orders.length > 0;
+
+    orders.forEach(o => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${formatTimestamp(o.createdAt)}</td>
+        <td>${escapeHtml(o.collaName || o.collaCode || '—')}</td>
+        <td>${escapeHtml(o.capEmail || '—')}</td>
+        <td>${(o.items || []).length}</td>
+        <td>${(Number(o.total) || 0).toFixed(2)} €</td>
+        <td>
+          <button class="btn btn-outline btn-small btn-order-detail">Detall</button>
+          <button class="btn btn-danger btn-small btn-delete-order-admin" data-id="${o.id}">Eliminar</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+
+      const detail = document.createElement('tr');
+      detail.className = 'order-items-detail';
+      detail.hidden = true;
+      detail.innerHTML = `<td colspan="6">${(o.items || []).map(it =>
+        `${it.quantity} ${escapeHtml(it.unit || '')} — ${escapeHtml(it.serviceName)} (${(Number(it.unitPrice) || 0).toFixed(2)} €/${escapeHtml(it.unit || 'unitat')} → ${((Number(it.unitPrice) || 0) * it.quantity).toFixed(2)} €)`
+      ).join('<br>') || '—'}</td>`;
+      tbody.appendChild(detail);
+    });
+
+    // Aggregated shopping-list totals
+    const totals = {};
+    orders.forEach(o => (o.items || []).forEach(it => {
+      const key = it.serviceId || it.serviceName;
+      if (!totals[key]) totals[key] = { name: it.serviceName, unit: it.unit || 'unitat', qty: 0, cost: 0 };
+      totals[key].qty += Number(it.quantity) || 0;
+      totals[key].cost += (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0);
+    }));
+
+    const tBody = $('#admin-orders-totals-body');
+    const tEmpty = $('#admin-orders-totals-empty');
+    tBody.innerHTML = '';
+    const keys = Object.keys(totals);
+    tEmpty.hidden = keys.length > 0;
+    keys.sort((a, b) => totals[a].name.localeCompare(totals[b].name)).forEach(k => {
+      const t = totals[k];
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHtml(t.name)}</td>
+        <td>${t.qty}</td>
+        <td>${escapeHtml(t.unit)}</td>
+        <td>${t.cost.toFixed(2)} €</td>
+      `;
+      tBody.appendChild(tr);
+    });
+  }
+
+  function initAdminOrders() {
+    $('#admin-orders-colla-filter').addEventListener('change', renderAdminOrders);
+    $('#btn-admin-orders-export').addEventListener('click', exportOrdersExcel);
+
+    $('#admin-orders-body').addEventListener('click', async e => {
+      const btnDetail = e.target.closest('.btn-order-detail');
+      if (btnDetail) {
+        const detailRow = btnDetail.closest('tr').nextElementSibling;
+        if (detailRow) detailRow.hidden = !detailRow.hidden;
+        return;
+      }
+      const btnDel = e.target.closest('.btn-delete-order-admin');
+      if (!btnDel) return;
+      if (!confirm('Segur que vols eliminar aquesta comanda?')) return;
+      showLoading();
+      try {
+        await db.collection('orders').doc(btnDel.dataset.id).delete();
+        toast('Comanda eliminada.', 'success');
+        await loadAdminOrders();
+      } catch (err) {
+        toast('Error eliminant.', 'error');
+        console.error(err);
+      }
+      hideLoading();
+    });
+  }
+
+  function exportOrdersExcel() {
+    const orders = filteredAdminOrders();
+    if (orders.length === 0) { toast('No hi ha dades per exportar.', 'info'); return; }
+
+    // Sheet 1: one row per order item
+    const rows = [];
+    orders.forEach(o => (o.items || []).forEach(it => {
+      rows.push({
+        'Data': formatTimestamp(o.createdAt),
+        'Colla': o.collaName || o.collaCode || '',
+        'Cap': o.capEmail || '',
+        'Servei': it.serviceName,
+        'Quantitat': it.quantity,
+        'Unitat': it.unit || '',
+        'Preu unitari (€)': Number(it.unitPrice) || 0,
+        'Subtotal (€)': Math.round((Number(it.unitPrice) || 0) * it.quantity * 100) / 100
+      });
+    }));
+
+    // Sheet 2: aggregated shopping list
+    const totals = {};
+    orders.forEach(o => (o.items || []).forEach(it => {
+      const key = it.serviceId || it.serviceName;
+      if (!totals[key]) totals[key] = { name: it.serviceName, unit: it.unit || 'unitat', qty: 0, cost: 0 };
+      totals[key].qty += Number(it.quantity) || 0;
+      totals[key].cost += (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0);
+    }));
+    const totalRows = Object.values(totals)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(t => ({
+        'Servei': t.name,
+        'Quantitat': t.qty,
+        'Unitat': t.unit,
+        'Cost (€)': Math.round(t.cost * 100) / 100
+      }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Comandes');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(totalRows), 'Totals');
+    XLSX.writeFile(wb, 'comandes.xlsx');
+    toast('Excel descarregat!', 'success');
+  }
+
   // ─── Utility: escape HTML ──────────────────────────────────
   function escapeHtml(str) {
     if (!str) return '';
@@ -1123,7 +1630,10 @@
     initSuccess();
     initLogin();
     initCapDashboard();
+    initCapOrders();
     initAdminDashboard();
+    initAdminServices();
+    initAdminOrders();
 
     initAuthListener();
   }

@@ -171,13 +171,20 @@
       </div>
     </nav>
     <div class="dashboard-content">
+      <div id="cap-colla-tabs" class="colla-tabs"></div>
+      <div class="cap-subnav">
+        <button id="btn-cap-tab-registres" class="cap-subnav-btn active">📋 Registres</button>
+        <button id="btn-cap-tab-comandes" class="cap-subnav-btn">🛒 Comandes</button>
+      </div>
+
+      <!-- ── Section: Registres ── -->
+      <div id="cap-section-registres">
       <div class="dash-header">
         <h1>Persones Registrades</h1>
         <div class="dash-header-actions">
           <button id="btn-cap-export" class="btn btn-accent btn-small">📥 Exportar a Excel</button>
         </div>
       </div>
-      <div id="cap-colla-tabs" class="colla-tabs"></div>
       <!-- PDF Upload -->
       <div class="admin-form-card" id="cap-pdf-upload-card">
         <h2>📄 Document de Termes i Condicions</h2>
@@ -208,6 +215,39 @@
         </table>
         <p id="cap-table-empty" class="table-empty" hidden>No hi ha persones registrades encara.</p>
       </div>
+      </div><!-- /cap-section-registres -->
+
+      <!-- ── Section: Comandes ── -->
+      <div id="cap-section-comandes" hidden>
+        <div class="dash-header">
+          <h1>Comandes</h1>
+        </div>
+        <div class="admin-form-card">
+          <h2>🛒 Nova comanda</h2>
+          <div id="cap-service-catalog"></div>
+          <div class="order-total-bar">
+            <span>Total: <strong id="cap-order-total">0.00 €</strong></span>
+            <button id="btn-cap-order-submit" class="btn btn-primary">Enviar comanda</button>
+          </div>
+        </div>
+        <div class="admin-form-card">
+          <h2>📜 Les meves comandes</h2>
+          <div class="table-wrapper">
+            <table class="data-table" id="cap-orders-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Articles</th>
+                  <th>Total</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="cap-orders-body"></tbody>
+            </table>
+            <p id="cap-orders-empty" class="table-empty" hidden>Encara no has fet cap comanda.</p>
+          </div>
+        </div>
+      </div><!-- /cap-section-comandes -->
     </div>
   </div>
 
@@ -226,6 +266,8 @@
         <div class="sidebar-item active" data-admin-tab="caps">👤 Caps de Colla</div>
         <div class="sidebar-item" data-admin-tab="colles">🏠 Colles</div>
         <div class="sidebar-item" data-admin-tab="registrations">📋 Tots els registres</div>
+        <div class="sidebar-item" data-admin-tab="services">🛒 Serveis</div>
+        <div class="sidebar-item" data-admin-tab="orders">📦 Comandes</div>
       </aside>
       <!-- Content -->
       <div class="dashboard-content">
@@ -339,6 +381,119 @@
               <tbody id="admin-reg-body"></tbody>
             </table>
             <p id="admin-reg-empty" class="table-empty" hidden>No hi ha registres.</p>
+          </div>
+        </div>
+
+        <!-- Tab: Serveis -->
+        <div id="admin-tab-services" class="admin-tab" hidden>
+          <div class="dash-header">
+            <h1>Gestió Serveis</h1>
+          </div>
+          <div class="admin-form-card">
+            <h2 id="service-form-title">Afegir Servei</h2>
+            <form id="service-form" class="inline-form">
+              <div class="form-group">
+                <label for="service-name">Nom</label>
+                <input type="text" id="service-name" required placeholder="Ex: Gel">
+              </div>
+              <div class="form-group">
+                <label for="service-price">Preu (€)</label>
+                <input type="number" id="service-price" min="0" step="0.01" required placeholder="0.00">
+              </div>
+              <div class="form-group">
+                <label for="service-unit">Unitat</label>
+                <select id="service-unit" required>
+                  <option value="unitat">unitat</option>
+                  <option value="kg">kg</option>
+                  <option value="litre">litre</option>
+                  <option value="pack">pack</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="service-category">Categoria</label>
+                <select id="service-category" required>
+                  <option value="menjar">🍖 Menjar</option>
+                  <option value="beguda">🍹 Beguda</option>
+                  <option value="gel">🧊 Gel</option>
+                  <option value="altres">📦 Altres</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="service-link">Enllaç (opcional)</label>
+                <input type="url" id="service-link" placeholder="https://...">
+              </div>
+              <div class="form-group">
+                <label>Imatge</label>
+                <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+                  <input type="file" id="service-image-input" accept="image/*" hidden>
+                  <button type="button" id="btn-service-image-choose" class="btn btn-outline btn-small">📂 Imatge...</button>
+                  <span id="service-image-filename" style="font-size:.82rem;color:var(--text-secondary);">Cap arxiu</span>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary" id="btn-service-save">Desar</button>
+              <button type="button" class="btn btn-outline" id="btn-service-cancel" hidden>Cancel·lar</button>
+            </form>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="admin-services-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Nom</th>
+                  <th>Categoria</th>
+                  <th>Preu</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="admin-services-body"></tbody>
+            </table>
+            <p id="admin-services-empty" class="table-empty" hidden>No hi ha serveis.</p>
+          </div>
+        </div>
+
+        <!-- Tab: Comandes -->
+        <div id="admin-tab-orders" class="admin-tab" hidden>
+          <div class="dash-header">
+            <h1>Comandes</h1>
+            <div class="dash-header-actions">
+              <select id="admin-orders-colla-filter">
+                <option value="">Totes les colles</option>
+              </select>
+              <button id="btn-admin-orders-export" class="btn btn-accent btn-small">📥 Exportar a Excel</button>
+            </div>
+          </div>
+          <div class="admin-form-card">
+            <h2>🧾 Totals (llista de la compra)</h2>
+            <div class="table-wrapper">
+              <table class="data-table" id="admin-orders-totals-table">
+                <thead>
+                  <tr>
+                    <th>Servei</th>
+                    <th>Quantitat</th>
+                    <th>Unitat</th>
+                    <th>Cost</th>
+                  </tr>
+                </thead>
+                <tbody id="admin-orders-totals-body"></tbody>
+              </table>
+              <p id="admin-orders-totals-empty" class="table-empty" hidden>Cap comanda.</p>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="admin-orders-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Colla</th>
+                  <th>Cap</th>
+                  <th>Articles</th>
+                  <th>Total</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="admin-orders-body"></tbody>
+            </table>
+            <p id="admin-orders-empty" class="table-empty" hidden>No hi ha comandes.</p>
           </div>
         </div>
 
