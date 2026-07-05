@@ -19,8 +19,7 @@ _Rolling document, overwritten each session. Last updated: 2026-07-05 (end of se
 
 ## Pending / next session
 
-1. **Said's admin password** (`said@magmamedia.cat`) — still on the leaked `Garriguella2026` unless the user changed it without saying so. Confirm and rotate (reset email or Admin SDK snippet in CONTEXT.md conventions).
-2. **Full Comandes end-to-end check as admin**: darnabar's cap side worked; still worth one admin pass — order visible in Comandes tab, totals correct, Excel export opens with both sheets.
-3. **Delete legacy index** `registrations(collaCode, timestamp)` in Firestore console (kept a few days for stale cached frontends; safe to remove ~2026-07-10).
-4. Real caps will need the "🔁 Correu contrasenya" button on first login (their old generated passwords are gone).
-5. Deferred ideas: Firebase Hosting move (cache control + private repo), App Check against registration spam.
+1. **Test the cap password-reset flow end-to-end**: the "🔁 Correu contrasenya" button renders, but nobody has yet received the email and set a password through it. Real caps depend on it (their old generated passwords are gone).
+2. Deferred ideas: Firebase Hosting move (cache control + private repo), App Check against registration spam.
+
+Closed at session end 2026-07-05: Said's admin password rotated ✔ · admin-side Comandes verified (totals + Excel) ✔ · legacy `registrations(collaCode, timestamp)` index deleted ✔.
