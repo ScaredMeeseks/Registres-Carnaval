@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAdmin() {
+      return request.auth != null &&
+        (request.auth.token.email == 'marna96@gmail.com' ||
+         request.auth.token.email == 'said@magmamedia.cat');
+    }
+
+    // Caps are email-keyed docs in Firestore (cross-service lookup)
+    function isCap() {
+      return request.auth != null &&
+        firestore.exists(/databases/(default)/documents/caps/$(request.auth.token.email));
+    }
+
+    // Per-colla T&C documents uploaded from the cap/admin dashboard
+    match /terms/{collaId}/{fileName} {
+      allow read: if true;
+      allow create, update: if (isAdmin() || isCap())
+        && request.resource.size < 10 * 1024 * 1024
+        && (request.resource.contentType == 'application/pdf'
+            || request.resource.contentType == 'text/html');
+      allow delete: if isAdmin() || isCap();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -8,13 +8,6 @@
   const $ = (sel, ctx = document) => ctx.querySelector(sel);
   const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
 
-  // ─── Constants ──────────────────────────────────────────────
-  const ADMIN_EMAILS = ['marna96@gmail.com', 'said@magmamedia.cat'];
-  const ADMIN_SEEDS = [
-    { email: 'marna96@gmail.com',    password: 'Garriguella2026' },
-    { email: 'said@magmamedia.cat',   password: 'Garriguella2026' }
-  ];
-
   // ─── State ──────────────────────────────────────────────────
   let currentUser = null;   // firebase.User
   let currentRole = null;   // 'admin' | 'cap'
@@ -23,7 +16,6 @@
   let currentCollaId = null;        // Firestore doc id of selected colla
   let pendingRegistration = null;   // temp object before T&C
   let capColles = [];               // colles assigned to current cap
-  let isSeeding = false;            // guard: don't route during admin seeding
 
   // ─── View switching ─────────────────────────────────────────
   function showView(id) {
@@ -85,51 +77,6 @@
       exists = !snap.empty;
     }
     return code;
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  //  ADMIN SEEDING — run once to create auth accounts
-  // ═══════════════════════════════════════════════════════════
-  async function seedAdmins() {
-    isSeeding = true;
-
-    for (const admin of ADMIN_SEEDS) {
-      // Check if Firestore doc already exists
-      try {
-        const doc = await db.collection('admins').doc(admin.email).get();
-        if (doc.exists) { continue; } // Already seeded
-      } catch (e) { /* ignore read errors, try to seed anyway */ }
-
-      try {
-        // Try to create the auth account (auto-signs in)
-        await auth.createUserWithEmailAndPassword(admin.email, admin.password);
-      } catch (e) {
-        if (e.code === 'auth/email-already-in-use') {
-          // Auth account exists — sign in instead
-          try {
-            await auth.signInWithEmailAndPassword(admin.email, admin.password);
-          } catch (e2) {
-            console.warn(`Cannot sign in as ${admin.email}:`, e2.message);
-            continue;
-          }
-        } else {
-          console.warn(`Cannot create ${admin.email}:`, e.message);
-          continue;
-        }
-      }
-
-      // Now signed in as admin — write Firestore doc
-      try {
-        await db.collection('admins').doc(admin.email).set({ email: admin.email }, { merge: true });
-        console.log(`Admin seeded: ${admin.email}`);
-      } catch (e) {
-        console.warn(`Firestore write failed for ${admin.email}:`, e.message);
-      }
-
-      await auth.signOut();
-    }
-
-    isSeeding = false;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -225,7 +172,7 @@
         return;
       }
 
-      pendingRegistration = { name, surname, idNumber: id, email, phone, collaCode: currentCollaCode, collaName: currentCollaName };
+      pendingRegistration = { name, surname, idNumber: id, email, phone, collaCode: currentCollaCode, collaName: currentCollaName, collaId: currentCollaId };
 
       // Show confirmation
       $('#confirm-name').textContent = name;
@@ -248,21 +195,11 @@
     $('#btn-confirm-submit').addEventListener('click', async () => {
       if (!pendingRegistration) return;
       showLoading();
-      try {
-        pendingRegistration.tcAccepted = false;
-        pendingRegistration.timestamp = firebase.firestore.FieldValue.serverTimestamp();
-        const docRef = await db.collection('registrations').add(pendingRegistration);
-        pendingRegistration._id = docRef.id;
-
-        // Load the colla's custom PDF if it exists
-        await loadCollaPdf(currentCollaId);
-
-        showView('view-terms');
-        initTermsScroll();
-      } catch (e) {
-        toast('Error desant el registre. Torna-ho a provar.', 'error');
-        console.error(e);
-      }
+      // Load the colla's custom PDF if it exists — nothing is written to
+      // Firestore until the T&C are accepted
+      await loadCollaPdf(currentCollaId);
+      showView('view-terms');
+      resetTermsView();
       hideLoading();
     });
   }
@@ -270,45 +207,55 @@
   // ═══════════════════════════════════════════════════════════
   //  4. TERMS & CONDITIONS — scroll gating
   // ═══════════════════════════════════════════════════════════
-  function initTermsScroll() {
+  function checkTermsScroll() {
     const container = $('#terms-scroll-container');
-    const checkbox = $('#tc-checkbox');
-    const hint = $('#terms-hint');
-    const btnSave = $('#btn-terms-save');
+    // Check if scrolled to bottom (with 20px tolerance)
+    const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 20;
+    if (atBottom) {
+      $('#tc-checkbox').disabled = false;
+      $('#terms-hint').hidden = true;
+    }
+  }
 
-    // Reset
+  // Called each time the terms view is shown
+  function resetTermsView() {
+    const checkbox = $('#tc-checkbox');
     checkbox.checked = false;
     checkbox.disabled = true;
-    btnSave.disabled = true;
-    hint.hidden = false;
+    $('#btn-terms-save').disabled = true;
+    $('#terms-hint').hidden = false;
+    $('#terms-scroll-container').scrollTop = 0;
+    // Also check shortly after in case content is short
+    setTimeout(checkTermsScroll, 500);
+  }
 
-    function checkScroll() {
-      // Check if scrolled to bottom (with 20px tolerance)
-      const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 20;
-      if (atBottom) {
-        checkbox.disabled = false;
-        hint.hidden = true;
-      }
-    }
+  // Called once at startup — listeners must not stack across registrations
+  function initTerms() {
+    const container = $('#terms-scroll-container');
+    const checkbox = $('#tc-checkbox');
+    const btnSave = $('#btn-terms-save');
 
-    container.addEventListener('scroll', checkScroll);
-    // Also check immediately in case content is short
-    setTimeout(checkScroll, 500);
+    container.addEventListener('scroll', checkTermsScroll);
 
     checkbox.addEventListener('change', () => {
       btnSave.disabled = !checkbox.checked;
     });
 
     btnSave.addEventListener('click', async () => {
-      if (!checkbox.checked || !pendingRegistration) return;
+      const reg = pendingRegistration;
+      if (!checkbox.checked || !reg) return;
+      pendingRegistration = null; // guard against double-click double writes
       showLoading();
       try {
-        await db.collection('registrations').doc(pendingRegistration._id).update({ tcAccepted: true });
+        await db.collection('registrations').add({
+          ...reg,
+          tcAccepted: true,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
         showView('view-success');
-        // Reset form
         $('#register-form').reset();
-        pendingRegistration = null;
       } catch (e) {
+        pendingRegistration = reg; // restore so the user can retry
         toast('Error desant. Torna-ho a provar.', 'error');
         console.error(e);
       }
@@ -410,8 +357,6 @@
   // ═══════════════════════════════════════════════════════════
   function initAuthListener() {
     auth.onAuthStateChanged(async user => {
-      if (isSeeding) return; // Don't route during admin seeding
-
       if (!user) {
         currentUser = null;
         currentRole = null;
@@ -425,14 +370,15 @@
       const adminDoc = await db.collection('admins').doc(email).get();
       const isAdmin = adminDoc.exists;
 
-      // Check if also cap de colla
-      const capSnap = await db.collection('caps').where('email', '==', email).get();
-      const isCap = !capSnap.empty;
+      // Check if also cap de colla (caps are keyed by email)
+      const capDoc = await db.collection('caps').doc(email).get();
+      const isCap = capDoc.exists;
 
       if (isAdmin) {
         currentRole = 'admin';
         $('#admin-user-label').textContent = email;
         showView('view-admin-dashboard');
+        await runMigrations();
         loadAdminData();
         hideLoading();
         return;
@@ -440,7 +386,7 @@
 
       if (isCap) {
         currentRole = 'cap';
-        const capData = capSnap.docs[0].data();
+        const capData = capDoc.data();
         $('#cap-user-label').textContent = capData.name || email;
         showView('view-cap-dashboard');
         loadCapData(email);
@@ -453,6 +399,50 @@
       await auth.signOut();
       hideLoading();
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  ONE-TIME MIGRATIONS — run on admin login, guarded by marker
+  // ═══════════════════════════════════════════════════════════
+  async function runMigrations() {
+    try {
+      const marker = await db.collection('meta').doc('migrations').get();
+      if (marker.exists && marker.data().v >= 1) return;
+
+      // 1. Caps: re-key docs by email, drop stored plaintext passwords
+      const capsSnap = await db.collection('caps').get();
+      for (const doc of capsSnap.docs) {
+        const d = doc.data();
+        if (!d.email) continue;
+        if (doc.id !== d.email) {
+          const { plainPassword, ...rest } = d;
+          await db.collection('caps').doc(d.email).set(rest, { merge: true });
+          await doc.ref.delete();
+        } else if (d.plainPassword !== undefined) {
+          await doc.ref.update({ plainPassword: firebase.firestore.FieldValue.delete() });
+        }
+      }
+
+      // 2. Registrations: backfill collaId from collaCode
+      const collesSnap = await db.collection('colles').get();
+      const codeToId = {};
+      collesSnap.docs.forEach(c => { codeToId[c.data().code] = c.id; });
+      const regsSnap = await db.collection('registrations').get();
+      for (const doc of regsSnap.docs) {
+        const d = doc.data();
+        if (!d.collaId && codeToId[d.collaCode]) {
+          await doc.ref.update({ collaId: codeToId[d.collaCode] });
+        }
+      }
+
+      await db.collection('meta').doc('migrations').set({
+        v: 1,
+        ranAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      console.log('Migrations v1 completed');
+    } catch (e) {
+      console.warn('Migration error:', e);
+    }
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -476,7 +466,7 @@
       // Render colla tabs
       renderCollaTabs();
       // Load registrations for the first colla by default
-      await loadCapRegistrations(capColles[0].code);
+      await loadCapRegistrations(capColles[0].id);
     } catch (e) {
       toast('Error carregant dades.', 'error');
       console.error(e);
@@ -496,7 +486,7 @@
       btn.addEventListener('click', () => {
         $$('.colla-tab').forEach(t => t.classList.remove('active'));
         btn.classList.add('active');
-        loadCapRegistrations(colla.code);
+        loadCapRegistrations(colla.id);
         updatePdfStatus(colla.id);
       });
       container.appendChild(btn);
@@ -507,14 +497,15 @@
     }
   }
 
-  async function loadCapRegistrations(collaCode) {
+  async function loadCapRegistrations(collaId) {
     const tbody = $('#cap-table-body');
     const empty = $('#cap-table-empty');
     tbody.innerHTML = '';
 
     try {
+      // Query by collaId: security rules verify cap membership via the colla doc
       const snap = await db.collection('registrations')
-        .where('collaCode', '==', collaCode)
+        .where('collaId', '==', collaId)
         .orderBy('timestamp', 'desc')
         .get();
 
@@ -665,11 +656,12 @@
     const activeTab = $('.colla-tab.active');
     if (!activeTab) { toast('Selecciona una colla primer.', 'error'); return; }
     const code = activeTab.dataset.code;
+    const collaId = activeTab.dataset.collaId;
 
     showLoading();
     try {
       const snap = await db.collection('registrations')
-        .where('collaCode', '==', code)
+        .where('collaId', '==', collaId)
         .orderBy('timestamp', 'desc')
         .get();
 
@@ -734,26 +726,26 @@
 
       showLoading();
       try {
-        // Check if already exists
-        const existing = await db.collection('caps').where('email', '==', email).get();
-        if (!existing.empty) {
+        // Check if already exists (caps are keyed by email)
+        const existing = await db.collection('caps').doc(email).get();
+        if (existing.exists) {
           toast('Aquest correu ja és cap de colla.', 'error');
           hideLoading();
           return;
         }
 
-        const password = generatePassword();
-        let passwordToStore = password;
         let authAccountExisted = false;
 
-        // Create Firebase Auth account via REST API (without signing out current admin)
+        // Create Firebase Auth account via REST API (without signing out the
+        // current admin). The random password is a throwaway — the cap sets
+        // their own via the password-reset email; nothing is stored.
         const apiKey = firebase.app().options.apiKey;
         const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: email,
-            password: password,
+            password: generatePassword(),
             returnSecureToken: false
           })
         });
@@ -762,9 +754,7 @@
         if (result.error) {
           if (result.error.message === 'EMAIL_EXISTS') {
             // Auth account already exists (e.g., admin adding themselves as cap)
-            // Just create the Firestore doc, store "(compte existent)" as password
             authAccountExisted = true;
-            passwordToStore = '(utilitza la contrasenya existent)';
           } else {
             toast('Error creant el compte: ' + result.error.message, 'error');
             hideLoading();
@@ -772,18 +762,17 @@
           }
         }
 
-        // Store in Firestore with plain password
-        await db.collection('caps').add({
+        await db.collection('caps').doc(email).set({
           email: email,
           name: name,
-          plainPassword: passwordToStore,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
         if (authAccountExisted) {
           toast(`Cap de colla afegit: ${email} (compte existent, mateixa contrasenya)`, 'success');
         } else {
-          toast(`Cap de colla afegit: ${email}`, 'success');
+          await auth.sendPasswordResetEmail(email);
+          toast(`Cap de colla afegit: ${email}. S'ha enviat un correu per establir la contrasenya.`, 'success');
         }
         $('#add-cap-form').reset();
         loadAdminCaps();
@@ -849,8 +838,21 @@
       hideLoading();
     });
 
-    // ── Delete cap (delegated) ──
+    // ── Cap row actions: resend reset email / delete (delegated) ──
     $('#admin-caps-body').addEventListener('click', async e => {
+      const btnResend = e.target.closest('.btn-resend-cap');
+      if (btnResend) {
+        showLoading();
+        try {
+          await auth.sendPasswordResetEmail(btnResend.dataset.email);
+          toast(`Correu de restabliment enviat a ${btnResend.dataset.email}.`, 'success');
+        } catch (err) {
+          toast('Error enviant el correu.', 'error');
+          console.error(err);
+        }
+        hideLoading();
+        return;
+      }
       const btn = e.target.closest('.btn-delete-cap');
       if (!btn) return;
       if (!confirm('Segur que vols eliminar aquest cap de colla?')) return;
@@ -944,8 +946,10 @@
         tr.innerHTML = `
           <td>${escapeHtml(d.name)}</td>
           <td>${escapeHtml(d.email)}</td>
-          <td><span class="password-cell">${escapeHtml(d.plainPassword)}</span></td>
-          <td><button class="btn btn-danger btn-small btn-delete-cap" data-id="${doc.id}">Eliminar</button></td>
+          <td>
+            <button class="btn btn-outline btn-small btn-resend-cap" data-email="${escapeHtml(d.email)}">🔁 Correu contrasenya</button>
+            <button class="btn btn-danger btn-small btn-delete-cap" data-id="${doc.id}">Eliminar</button>
+          </td>
         `;
         tbody.appendChild(tr);
       });
@@ -1108,27 +1112,19 @@
   // ═══════════════════════════════════════════════════════════
   //  INIT
   // ═══════════════════════════════════════════════════════════
-  async function init() {
+  function init() {
     showView('view-landing');
 
     // Initialize all UI modules first so buttons always work
     initLanding();
     initRegistration();
     initConfirmation();
+    initTerms();
     initSuccess();
     initLogin();
     initCapDashboard();
     initAdminDashboard();
 
-    // Seed admin accounts BEFORE starting the auth listener
-    // to avoid sign-in/sign-out interference
-    try {
-      await seedAdmins();
-    } catch (e) {
-      console.warn('Admin seeding error (may be normal on first load):', e);
-    }
-
-    // Now start listening for auth state changes
     initAuthListener();
   }
 
