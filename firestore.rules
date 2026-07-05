@@ -150,6 +150,41 @@ service cloud.firestore {
       allow delete: if isAdmin() || capOwnsColla(resource.data.collaId);
     }
 
+    // Forms — cap-built questionnaires answered by colla members.
+    // Immutable once created (no edit UI) so responses always match questions.
+    match /forms/{formId} {
+      allow create: if (isAdmin() || capOwnsColla(request.resource.data.collaId))
+        && request.resource.data.authorEmail == request.auth.token.email
+        && request.resource.data.keys().hasAll(
+          ['collaId', 'title', 'questions', 'authorEmail', 'createdAt'])
+        && request.resource.data.keys().hasOnly(
+          ['collaId', 'title', 'description', 'questions', 'authorEmail', 'createdAt'])
+        && request.resource.data.questions is list;
+      allow read: if isAdmin()
+        || capOwnsColla(resource.data.collaId)
+        || isMemberOfColla(resource.data.collaId);
+      allow update: if (isAdmin() || capOwnsColla(resource.data.collaId))
+        && request.resource.data.collaId == resource.data.collaId;
+      allow delete: if isAdmin() || capOwnsColla(resource.data.collaId);
+
+      // One response per member (doc ID = email). Immutable: no update rule —
+      // members can never edit what they submitted.
+      match /responses/{email} {
+        allow create: if request.auth != null
+          && request.auth.token.email == email
+          && request.resource.data.email == email
+          && isMemberOfColla(get(/databases/$(database)/documents/forms/$(formId)).data.collaId)
+          && request.resource.data.keys().hasAll(['email', 'name', 'answers', 'submittedAt'])
+          && request.resource.data.keys().hasOnly(['email', 'name', 'answers', 'submittedAt'])
+          && request.resource.data.answers is list;
+        allow read: if isAdmin()
+          || capOwnsColla(get(/databases/$(database)/documents/forms/$(formId)).data.collaId)
+          || (request.auth != null && request.auth.token.email == email);
+        allow delete: if isAdmin()
+          || capOwnsColla(get(/databases/$(database)/documents/forms/$(formId)).data.collaId);
+      }
+    }
+
     // Meta — migration markers etc.
     match /meta/{docId} {
       allow read, write: if isAdmin();

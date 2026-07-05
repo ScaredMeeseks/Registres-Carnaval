@@ -473,6 +473,70 @@ a:hover { text-decoration: underline; }
 }
 .tc-note[hidden] { display: none; }
 
+/* ═══════════ Formularis ═══════════ */
+.form-card-toggle { cursor: pointer; user-select: none; }
+.form-chevron { font-size: .8rem; color: var(--text-secondary); }
+.form-card-pending {
+  background: #fff8e1;
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+}
+.form-state { font-size: .82rem; color: var(--text-secondary); margin-bottom: .2rem; }
+.form-participation { font-size: .88rem; color: var(--text-secondary); margin-bottom: .2rem; }
+
+.form-q { margin: .9rem 0; }
+.form-q-title { font-weight: 600; font-size: .92rem; margin-bottom: .35rem; }
+.form-q-meta { font-weight: 400; font-size: .76rem; color: var(--text-secondary); margin-left: .3rem; }
+.form-required { color: var(--danger); }
+.form-opt {
+  display: flex; align-items: center; gap: .5rem;
+  font-size: .9rem; padding: .2rem 0; cursor: pointer;
+}
+.fq-other-text {
+  display: block; margin: .2rem 0 0 1.6rem;
+  padding: .4rem .6rem; border: 2px solid var(--border); border-radius: 6px;
+  font-family: inherit; font-size: .88rem; width: min(100%, 320px);
+}
+.fq-other-text:focus { outline: none; border-color: var(--primary-light); }
+.fq-other-text:disabled { opacity: .5; }
+.form-answer { font-size: .9rem; }
+.form-send-row { display: flex; align-items: center; gap: .8rem; margin-top: 1rem; flex-wrap: wrap; }
+.form-send-row .error-msg { margin-bottom: 0; }
+
+/* Builder */
+.form-q-block {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .8rem 1rem; margin-bottom: .8rem; background: var(--bg);
+}
+.form-q-block-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .6rem; }
+.form-q-row {
+  display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center;
+  margin-bottom: .8rem; font-size: .88rem;
+}
+.form-q-row select {
+  margin-left: .4rem; padding: .35rem .5rem;
+  border: 2px solid var(--border); border-radius: 6px;
+  font-family: inherit; font-size: .88rem; background: #fff;
+}
+
+/* Response summary bars: single series (count per option) in the brand
+   primary on a recessive track; counts labeled in ink, not on the bar */
+.form-q-summary { margin: .7rem 0 1.1rem; }
+.chart-row {
+  display: grid; grid-template-columns: minmax(90px, 200px) 1fr 2.2rem;
+  align-items: center; gap: .6rem;
+  margin-bottom: .3rem; font-size: .85rem;
+}
+.chart-label { overflow-wrap: anywhere; }
+.chart-track { background: var(--bg); border-radius: 4px; height: 12px; overflow: hidden; }
+.chart-bar {
+  display: block; height: 100%;
+  background: var(--primary);
+  border-radius: 0 4px 4px 0;
+}
+.chart-count { color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+.form-other-answers { font-size: .85rem; color: var(--text-secondary); margin-top: .5rem; }
+
 .members-list {
   list-style: none;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

@@ -22,6 +22,8 @@
   let capColles = [];               // colles assigned to current cap
   let servicesCache = [];           // orderable services catalog (caps + admin)
   let capActiveCollaId = null;      // colla selected in the cap dashboard tabs
+  let capFormsCache = [];           // forms (+responses) of the active colla, for Excel/delete
+  let userFormsCache = [];          // forms of the member's colla, for answering
   let adminOrdersCache = [];        // all orders, for admin filtering/export
   let editingServiceId = null;      // service being edited in the admin form
 
@@ -679,12 +681,13 @@
       // Render colla tabs
       renderCollaTabs();
       capActiveCollaId = capColles[0].id;
-      // Load registrations + orders + posts for the first colla by default
+      // Load registrations + orders + posts + forms for the first colla by default
       await loadServices();
       renderOrderCatalog();
       await loadCapRegistrations(capActiveCollaId);
       loadCapOrders(capActiveCollaId);
       loadCapPosts(capActiveCollaId);
+      loadCapForms(capActiveCollaId);
     } catch (e) {
       toast('Error carregant dades.', 'error');
       console.error(e);
@@ -708,6 +711,7 @@
         loadCapRegistrations(colla.id);
         loadCapOrders(colla.id);
         loadCapPosts(colla.id);
+        loadCapForms(colla.id);
         updatePdfStatus(colla.id);
       });
       container.appendChild(btn);
@@ -1113,7 +1117,8 @@
     const tabs = [
       { btn: '#btn-cap-tab-registres', section: '#cap-section-registres' },
       { btn: '#btn-cap-tab-comandes', section: '#cap-section-comandes' },
-      { btn: '#btn-cap-tab-publicacions', section: '#cap-section-publicacions' }
+      { btn: '#btn-cap-tab-publicacions', section: '#cap-section-publicacions' },
+      { btn: '#btn-cap-tab-formularis', section: '#cap-section-formularis' }
     ];
     tabs.forEach(t => {
       $(t.btn).addEventListener('click', () => {
@@ -1160,35 +1165,43 @@
     return m ? m[1] : null;
   }
 
-  // Shared renderer: cap list (with pin/delete controls) and user feed (read-only)
+  // Millis from a Firestore timestamp (0 for pending serverTimestamp)
+  function tsMillis(ts) {
+    return ts && ts.toMillis ? ts.toMillis() : 0;
+  }
+
+  // Builds one post card; used by the cap list (with pin/delete controls)
+  // and the member feed (read-only)
+  function buildPostCard(p, withControls) {
+    // Only render http(s) links — anything else is dropped
+    const url = (p.url && /^https?:\/\//i.test(p.url)) ? p.url : null;
+    const ytId = url ? youtubeEmbedId(url) : null;
+    const card = document.createElement('div');
+    card.className = 'post-card' + (p.pinned ? ' post-card-pinned' : '');
+    card.innerHTML = `
+      <div class="post-card-head">
+        <span class="post-card-title">${p.pinned ? '📌 ' : ''}${escapeHtml(p.title)}</span>
+        <span class="post-card-date">${formatTimestamp(p.createdAt)}</span>
+      </div>
+      ${p.body ? `<p class="post-card-body">${escapeHtml(p.body)}</p>` : ''}
+      ${p.imageUrl ? `<a href="${escapeHtml(p.imageUrl)}" target="_blank" rel="noopener"><img class="post-card-img" src="${escapeHtml(p.imageUrl)}" alt="" loading="lazy"></a>` : ''}
+      ${ytId
+        ? `<div class="post-card-video"><iframe src="https://www.youtube-nocookie.com/embed/${ytId}" title="YouTube" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`
+        : (url ? `<a class="post-card-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">🔗 ${escapeHtml(url)}</a>` : '')}
+      ${withControls ? `<div class="post-card-actions">
+        <button class="btn btn-outline btn-small btn-pin-post" data-id="${p.id}" data-pinned="${p.pinned ? 1 : 0}">${p.pinned ? 'Desfixar' : '📌 Fixar'}</button>
+        <button class="btn btn-danger btn-small btn-delete-post" data-id="${p.id}">Eliminar</button>
+      </div>` : ''}
+    `;
+    return card;
+  }
+
   function renderPostsList(container, emptyEl, posts, withControls) {
     container.innerHTML = '';
     emptyEl.hidden = posts.length > 0;
     // Pinned first; the stable sort keeps newest-first order within each group
     const sorted = [...posts].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-    sorted.forEach(p => {
-      // Only render http(s) links — anything else is dropped
-      const url = (p.url && /^https?:\/\//i.test(p.url)) ? p.url : null;
-      const ytId = url ? youtubeEmbedId(url) : null;
-      const card = document.createElement('div');
-      card.className = 'post-card' + (p.pinned ? ' post-card-pinned' : '');
-      card.innerHTML = `
-        <div class="post-card-head">
-          <span class="post-card-title">${p.pinned ? '📌 ' : ''}${escapeHtml(p.title)}</span>
-          <span class="post-card-date">${formatTimestamp(p.createdAt)}</span>
-        </div>
-        ${p.body ? `<p class="post-card-body">${escapeHtml(p.body)}</p>` : ''}
-        ${p.imageUrl ? `<a href="${escapeHtml(p.imageUrl)}" target="_blank" rel="noopener"><img class="post-card-img" src="${escapeHtml(p.imageUrl)}" alt="" loading="lazy"></a>` : ''}
-        ${ytId
-          ? `<div class="post-card-video"><iframe src="https://www.youtube-nocookie.com/embed/${ytId}" title="YouTube" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`
-          : (url ? `<a class="post-card-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">🔗 ${escapeHtml(url)}</a>` : '')}
-        ${withControls ? `<div class="post-card-actions">
-          <button class="btn btn-outline btn-small btn-pin-post" data-id="${p.id}" data-pinned="${p.pinned ? 1 : 0}">${p.pinned ? 'Desfixar' : '📌 Fixar'}</button>
-          <button class="btn btn-danger btn-small btn-delete-post" data-id="${p.id}">Eliminar</button>
-        </div>` : ''}
-      `;
-      container.appendChild(card);
-    });
+    sorted.forEach(p => container.appendChild(buildPostCard(p, withControls)));
   }
 
   async function loadCapPosts(collaId) {
@@ -1297,6 +1310,269 @@
   }
 
   // ═══════════════════════════════════════════════════════════
+  //  7e. FORMULARIS (CAP) — builder, summaries, Excel
+  // ═══════════════════════════════════════════════════════════
+  function addQuestionBlock() {
+    const div = document.createElement('div');
+    div.className = 'form-q-block';
+    div.innerHTML = `
+      <div class="form-q-block-head">
+        <strong>Pregunta</strong>
+        <button type="button" class="btn btn-danger btn-small btn-remove-question">✕</button>
+      </div>
+      <div class="form-group">
+        <input type="text" class="fq-text" maxlength="300" placeholder="Text de la pregunta">
+      </div>
+      <div class="form-q-row">
+        <label>Tipus
+          <select class="fq-type">
+            <option value="single">Una resposta</option>
+            <option value="multi">Diverses respostes</option>
+          </select>
+        </label>
+        <label class="checkbox-label"><input type="checkbox" class="fq-other"> <span>Permetre "Altres"</span></label>
+        <label class="checkbox-label"><input type="checkbox" class="fq-required"> <span>Obligatòria</span></label>
+      </div>
+      <div class="form-group">
+        <label>Opcions (una per línia)</label>
+        <textarea class="fq-options" rows="3" placeholder="Opció 1&#10;Opció 2"></textarea>
+      </div>
+    `;
+    $('#form-questions').appendChild(div);
+  }
+
+  function resetFormBuilder() {
+    $('#cap-form-builder').reset();
+    $('#form-questions').innerHTML = '';
+    addQuestionBlock();
+  }
+
+  // Per-question aggregation shared by the summary charts and the Excel export
+  function aggregateFormQuestion(form, qIndex) {
+    const q = form.questions[qIndex];
+    const counts = {};
+    q.options.forEach(o => { counts[o] = 0; });
+    const otherAnswers = [];
+    form.responses.forEach(r => {
+      const a = (r.answers || [])[qIndex];
+      if (!a) return;
+      (a.selected || []).forEach(o => { if (counts[o] !== undefined) counts[o]++; });
+      if ((a.other || '').trim()) otherAnswers.push(a.other.trim());
+    });
+    return { counts, otherAnswers };
+  }
+
+  // Single-series horizontal bar (count per option, brand primary on a
+  // recessive track); width relative to the number of respondents
+  function chartRowHtml(label, count, total) {
+    const pct = total > 0 ? Math.round(count / total * 100) : 0;
+    const width = count > 0 ? Math.max(pct, 2) : 0;
+    return `
+      <div class="chart-row" title="${count} de ${total} respostes (${pct}%)">
+        <span class="chart-label">${escapeHtml(label)}</span>
+        <span class="chart-track"><span class="chart-bar" style="width:${width}%"></span></span>
+        <span class="chart-count">${count}</span>
+      </div>`;
+  }
+
+  function renderCapFormCard(f, registered) {
+    const nResp = f.responses.length;
+    const pct = registered > 0 ? Math.round(nResp / registered * 100) : 0;
+    const summaryHtml = f.questions.map((q, i) => {
+      const { counts, otherAnswers } = aggregateFormQuestion(f, i);
+      const rows = q.options.map(o => chartRowHtml(o, counts[o], nResp));
+      if (q.allowOther) rows.push(chartRowHtml('Altres', otherAnswers.length, nResp));
+      return `
+        <div class="form-q-summary">
+          <div class="form-q-title">${i + 1}. ${escapeHtml(q.text)}${q.required ? ' <span class="form-required">*</span>' : ''}
+            <span class="form-q-meta">${q.type === 'multi' ? 'resposta múltiple' : 'resposta única'}</span></div>
+          ${rows.join('')}
+          ${otherAnswers.length ? `<div class="form-other-answers"><strong>Respostes "Altres":</strong><br>${otherAnswers.map(t => `• ${escapeHtml(t)}`).join('<br>')}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    const card = document.createElement('div');
+    card.className = 'post-card form-card';
+    card.innerHTML = `
+      <div class="post-card-head form-card-toggle">
+        <span class="post-card-title">📝 ${escapeHtml(f.title)} <span class="form-chevron">▸</span></span>
+        <span class="post-card-date">${formatTimestamp(f.createdAt)}</span>
+      </div>
+      <div class="form-participation">Participació: <strong>${nResp}/${registered}</strong> (${pct}%)</div>
+      <div class="form-card-body" hidden>
+        ${f.description ? `<p class="post-card-body">${escapeHtml(f.description)}</p>` : ''}
+        ${summaryHtml}
+        <div class="post-card-actions">
+          <button class="btn btn-accent btn-small btn-form-excel" data-id="${f.id}">📥 Excel</button>
+          <button class="btn btn-danger btn-small btn-form-delete" data-id="${f.id}">Eliminar</button>
+        </div>
+      </div>`;
+    return card;
+  }
+
+  async function loadCapForms(collaId) {
+    const container = $('#cap-forms-list');
+    const empty = $('#cap-forms-empty');
+    container.innerHTML = '';
+    try {
+      const [formsSnap, regsSnap] = await Promise.all([
+        db.collection('forms').where('collaId', '==', collaId).get(),
+        db.collection('registrations').where('collaId', '==', collaId).get()
+      ]);
+      const registered = regsSnap.size;
+      const forms = formsSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+      await Promise.all(forms.map(async f => {
+        const rs = await db.collection('forms').doc(f.id).collection('responses').get();
+        f.responses = rs.docs.map(d => d.data());
+      }));
+      capFormsCache = forms;
+      empty.hidden = forms.length > 0;
+      forms.forEach(f => container.appendChild(renderCapFormCard(f, registered)));
+    } catch (e) {
+      toast('Error carregant formularis.', 'error');
+      console.error(e);
+    }
+  }
+
+  function exportFormExcel(formId) {
+    const f = capFormsCache.find(x => x.id === formId);
+    if (!f) return;
+    if (f.responses.length === 0) { toast('Encara no hi ha respostes.', 'info'); return; }
+
+    // Sheet 1: one row per respondent, one column per question
+    const rows = f.responses
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .map(r => {
+        const row = { 'Nom': r.name || '', 'Correu': r.email || '', 'Data': formatTimestamp(r.submittedAt) };
+        f.questions.forEach((q, i) => {
+          const a = (r.answers || [])[i] || {};
+          const parts = (a.selected || []).slice();
+          if ((a.other || '').trim()) parts.push(`Altres: ${a.other.trim()}`);
+          row[`${i + 1}. ${q.text}`] = parts.join('; ');
+        });
+        return row;
+      });
+
+    // Sheet 2: per-option counts
+    const summaryRows = [];
+    f.questions.forEach((q, i) => {
+      const { counts, otherAnswers } = aggregateFormQuestion(f, i);
+      q.options.forEach(o => summaryRows.push({ 'Pregunta': `${i + 1}. ${q.text}`, 'Opció': o, 'Recompte': counts[o] }));
+      if (q.allowOther) summaryRows.push({ 'Pregunta': `${i + 1}. ${q.text}`, 'Opció': 'Altres', 'Recompte': otherAnswers.length });
+    });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Respostes');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Resum');
+    const safeName = (f.title || 'formulari').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40) || 'formulari';
+    XLSX.writeFile(wb, `${safeName}.xlsx`);
+    toast('Excel descarregat!', 'success');
+  }
+
+  function initCapForms() {
+    addQuestionBlock(); // start the builder with one question
+
+    $('#btn-add-question').addEventListener('click', addQuestionBlock);
+
+    // Remove a question block (delegated)
+    $('#form-questions').addEventListener('click', e => {
+      const btn = e.target.closest('.btn-remove-question');
+      if (btn) btn.closest('.form-q-block').remove();
+    });
+
+    // Create the form
+    $('#cap-form-builder').addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!capActiveCollaId) { toast('Selecciona una colla primer.', 'error'); return; }
+      const title = $('#formb-title').value.trim();
+      const description = $('#formb-description').value.trim();
+      const blocks = $$('#form-questions .form-q-block');
+      if (!title) return;
+      if (blocks.length === 0) { toast('Afegeix almenys una pregunta.', 'error'); return; }
+
+      const questions = [];
+      for (const b of blocks) {
+        const text = $('.fq-text', b).value.trim();
+        const options = $('.fq-options', b).value
+          .split('\n').map(s => s.trim()).filter(Boolean);
+        const allowOther = $('.fq-other', b).checked;
+        if (!text) { toast('Totes les preguntes necessiten text.', 'error'); return; }
+        if (options.length === 0 && !allowOther) {
+          toast(`La pregunta "${text}" necessita opcions (o permetre "Altres").`, 'error');
+          return;
+        }
+        questions.push({
+          text: text,
+          type: $('.fq-type', b).value,
+          options: options,
+          allowOther: allowOther,
+          required: $('.fq-required', b).checked
+        });
+      }
+
+      showLoading();
+      try {
+        const data = {
+          collaId: capActiveCollaId,
+          title: title,
+          questions: questions,
+          authorEmail: currentUser.email.toLowerCase(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if (description) data.description = description;
+        await db.collection('forms').add(data);
+        toast('Formulari creat.', 'success');
+        resetFormBuilder();
+        loadCapForms(capActiveCollaId);
+      } catch (err) {
+        toast('Error creant el formulari.', 'error');
+        console.error(err);
+      }
+      hideLoading();
+    });
+
+    // Expand/collapse, Excel, delete (delegated)
+    $('#cap-forms-list').addEventListener('click', async e => {
+      const btnExcel = e.target.closest('.btn-form-excel');
+      if (btnExcel) { exportFormExcel(btnExcel.dataset.id); return; }
+
+      const btnDel = e.target.closest('.btn-form-delete');
+      if (btnDel) {
+        if (!confirm('Segur que vols eliminar aquest formulari i totes les seves respostes?')) return;
+        showLoading();
+        try {
+          const ref = db.collection('forms').doc(btnDel.dataset.id);
+          const rs = await ref.collection('responses').get();
+          for (const d of rs.docs) await d.ref.delete();
+          await ref.delete();
+          toast('Formulari eliminat.', 'success');
+          loadCapForms(capActiveCollaId);
+        } catch (err) {
+          toast('Error eliminant el formulari.', 'error');
+          console.error(err);
+        }
+        hideLoading();
+        return;
+      }
+
+      const head = e.target.closest('.form-card-toggle');
+      if (head) toggleFormCard(head);
+    });
+  }
+
+  function toggleFormCard(headEl) {
+    const card = headEl.closest('.post-card');
+    const body = card.querySelector('.form-card-body');
+    const chevron = card.querySelector('.form-chevron');
+    if (!body) return;
+    body.hidden = !body.hidden;
+    if (chevron) chevron.textContent = body.hidden ? '▸' : '▾';
+  }
+
+  // ═══════════════════════════════════════════════════════════
   //  7d. USER (MEMBER) DASHBOARD — colla page
   // ═══════════════════════════════════════════════════════════
   function showUserDashboard() {
@@ -1313,18 +1589,28 @@
       : 'La meva colla';
     showLoading();
     try {
-      const [postsSnap, membersSnap] = await Promise.all([
+      const [postsSnap, membersSnap, formsSnap] = await Promise.all([
         db.collection('posts')
           .where('collaId', '==', p.collaId)
           .orderBy('createdAt', 'desc')
           .get(),
         db.collection('users')
           .where('collaId', '==', p.collaId)
+          .get(),
+        db.collection('forms')
+          .where('collaId', '==', p.collaId)
           .get()
       ]);
 
-      renderPostsList($('#user-posts-list'), $('#user-posts-empty'),
-        postsSnap.docs.map(d => ({ id: d.id, ...d.data() })), false);
+      // My response per form (doc ID = my email)
+      userFormsCache = formsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const myResponses = {};
+      await Promise.all(userFormsCache.map(async f => {
+        const r = await db.collection('forms').doc(f.id).collection('responses').doc(p.email).get();
+        if (r.exists) myResponses[f.id] = r.data();
+      }));
+
+      renderUserFeed(postsSnap.docs.map(d => ({ id: d.id, ...d.data() })), userFormsCache, myResponses);
 
       const members = membersSnap.docs
         .map(d => d.data())
@@ -1346,10 +1632,173 @@
     hideLoading();
   }
 
+  // Feed: unanswered forms first (highlighted), then pinned posts, then
+  // posts + answered forms merged newest-first
+  function renderUserFeed(posts, forms, myResponses) {
+    const container = $('#user-posts-list');
+    const emptyEl = $('#user-posts-empty');
+    container.innerHTML = '';
+
+    const pendingForms = forms
+      .filter(f => !myResponses[f.id])
+      .sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+    const rest = [
+      ...posts.map(x => ({ kind: 'post', item: x })),
+      ...forms.filter(f => myResponses[f.id]).map(x => ({ kind: 'form', item: x }))
+    ].sort((a, b) =>
+      ((b.kind === 'post' && b.item.pinned) ? 1 : 0) - ((a.kind === 'post' && a.item.pinned) ? 1 : 0) ||
+      tsMillis(b.item.createdAt) - tsMillis(a.item.createdAt));
+
+    emptyEl.hidden = (pendingForms.length + rest.length) > 0;
+    pendingForms.forEach(f => container.appendChild(renderUserFormCard(f, null)));
+    rest.forEach(x => container.appendChild(
+      x.kind === 'post'
+        ? buildPostCard(x.item, false)
+        : renderUserFormCard(x.item, myResponses[x.item.id])));
+  }
+
+  // Answerable questions: option values are option INDICES (mapped back to
+  // text on submit) so option text never lands in an HTML attribute
+  function userFormQuestionsHtml(f) {
+    return f.questions.map((q, i) => {
+      const inputType = q.type === 'multi' ? 'checkbox' : 'radio';
+      const name = `fq_${f.id}_${i}`;
+      const opts = q.options.map((o, oi) =>
+        `<label class="form-opt"><input type="${inputType}" name="${name}" value="${oi}"> <span>${escapeHtml(o)}</span></label>`
+      ).join('');
+      const other = q.allowOther
+        ? `<label class="form-opt"><input type="${inputType}" name="${name}" value="__other__" class="fq-other-choice"> <span>Altres:</span></label>
+           <input type="text" class="fq-other-text" maxlength="300" placeholder="Escriu la teva resposta" disabled>`
+        : '';
+      return `
+        <div class="form-q" data-q="${i}">
+          <div class="form-q-title">${i + 1}. ${escapeHtml(q.text)}${q.required ? ' <span class="form-required">*</span>' : ''}
+            <span class="form-q-meta">${q.type === 'multi' ? 'pots marcar-ne més d\'una' : 'marca\'n una'}</span></div>
+          ${opts}${other}
+        </div>`;
+    }).join('') + `
+      <div class="form-send-row">
+        <button class="btn btn-primary btn-form-send" data-id="${f.id}">Enviar</button>
+        <span class="form-send-error error-msg" hidden></span>
+      </div>`;
+  }
+
+  // Read-only view of the member's own submitted answers
+  function userFormAnswersHtml(f, r) {
+    return f.questions.map((q, i) => {
+      const a = (r.answers || [])[i] || {};
+      const parts = (a.selected || []).slice();
+      if ((a.other || '').trim()) parts.push(`Altres: ${a.other.trim()}`);
+      return `
+        <div class="form-q">
+          <div class="form-q-title">${i + 1}. ${escapeHtml(q.text)}</div>
+          <div class="form-answer">${parts.length ? escapeHtml(parts.join(', ')) : '<em>Sense resposta</em>'}</div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderUserFormCard(f, myResponse) {
+    const answered = !!myResponse;
+    const card = document.createElement('div');
+    card.className = 'post-card form-card' + (answered ? '' : ' form-card-pending');
+    card.innerHTML = `
+      <div class="post-card-head form-card-toggle">
+        <span class="post-card-title">📝 ${escapeHtml(f.title)} <span class="form-chevron">▸</span></span>
+        <span class="post-card-date">${formatTimestamp(f.createdAt)}</span>
+      </div>
+      <div class="form-state form-card-toggle">${answered
+        ? '✅ Respost — clica per veure les teves respostes'
+        : '⏳ Pendent de respondre — clica per contestar'}</div>
+      <div class="form-card-body" hidden>
+        ${f.description ? `<p class="post-card-body">${escapeHtml(f.description)}</p>` : ''}
+        ${answered ? userFormAnswersHtml(f, myResponse) : userFormQuestionsHtml(f)}
+      </div>`;
+    return card;
+  }
+
+  async function submitFormResponse(formId, card) {
+    const f = userFormsCache.find(x => x.id === formId);
+    if (!f || !currentUserProfile) return;
+    const errorEl = card.querySelector('.form-send-error');
+    errorEl.hidden = true;
+
+    const answers = [];
+    let firstError = null;
+    f.questions.forEach((q, i) => {
+      const qEl = card.querySelector(`.form-q[data-q="${i}"]`);
+      const checked = [...qEl.querySelectorAll('input:checked')];
+      const otherChosen = checked.some(inp => inp.value === '__other__');
+      const otherInput = qEl.querySelector('.fq-other-text');
+      const otherText = otherInput ? otherInput.value.trim() : '';
+      const selected = checked
+        .filter(inp => inp.value !== '__other__')
+        .map(inp => q.options[parseInt(inp.value, 10)])
+        .filter(Boolean);
+
+      const a = { selected: selected };
+      if (otherChosen && otherText) a.other = otherText;
+      answers.push(a);
+
+      if (!firstError) {
+        if (otherChosen && !otherText) {
+          firstError = `Escriu la resposta "Altres" de la pregunta ${i + 1}.`;
+        } else if (q.required && selected.length === 0 && !(otherChosen && otherText)) {
+          firstError = `La pregunta ${i + 1} és obligatòria.`;
+        }
+      }
+    });
+
+    if (firstError) {
+      errorEl.textContent = firstError;
+      errorEl.hidden = false;
+      return;
+    }
+
+    showLoading();
+    try {
+      await db.collection('forms').doc(formId).collection('responses').doc(currentUserProfile.email).set({
+        email: currentUserProfile.email,
+        name: `${currentUserProfile.name || ''} ${currentUserProfile.surname || ''}`.trim(),
+        answers: answers,
+        submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      toast('Resposta enviada. Gràcies!', 'success');
+      loadUserData(); // re-render: card turns non-highlighted and read-only
+    } catch (e) {
+      // Rules deny overwrites of an existing response (no update allowed)
+      toast('No s\'ha pogut enviar. Potser ja havies respost aquest formulari.', 'error');
+      console.error(e);
+    }
+    hideLoading();
+  }
+
   function initUserDashboard() {
     $('#btn-user-logout').addEventListener('click', async () => {
       await auth.signOut();
       showView('view-login');
+    });
+
+    // Form cards in the feed: expand/collapse + send (delegated)
+    $('#user-posts-list').addEventListener('click', async e => {
+      const send = e.target.closest('.btn-form-send');
+      if (send) {
+        await submitFormResponse(send.dataset.id, send.closest('.post-card'));
+        return;
+      }
+      const head = e.target.closest('.form-card-toggle');
+      if (head) toggleFormCard(head);
+    });
+
+    // "Altres" text field follows its choice's checked state (delegated)
+    $('#user-posts-list').addEventListener('change', e => {
+      const qEl = e.target.closest('.form-q');
+      if (!qEl) return;
+      const choice = qEl.querySelector('.fq-other-choice');
+      const text = qEl.querySelector('.fq-other-text');
+      if (choice && text) {
+        text.disabled = !choice.checked;
+        if (choice.checked && e.target === choice) text.focus();
+      }
     });
   }
 
@@ -2100,6 +2549,7 @@
     initCapSubnav();
     initCapOrders();
     initCapPosts();
+    initCapForms();
     initUserDashboard();
     initAdminDashboard();
     initAdminServices();
