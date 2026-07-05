@@ -24,6 +24,13 @@ service cloud.firestore {
           get(/databases/$(database)/documents/colles/$(collaId)).data.capEmails;
     }
 
+    // Normal users have a users/{email} profile pointing at their colla.
+    // Works for list queries only because clients filter where('collaId','==',…)
+    function isMemberOfColla(collaId) {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.collaId == collaId;
+    }
+
     // Admins collection — each user may read their own doc (login routing)
     match /admins/{email} {
       allow read: if isAdmin() || (request.auth != null && request.auth.token.email == email);
@@ -34,6 +41,32 @@ service cloud.firestore {
     match /caps/{email} {
       allow read: if isAdmin() || (request.auth != null && request.auth.token.email == email);
       allow write: if isAdmin();
+    }
+
+    // Member profiles — doc ID is the member's email. Created at signup
+    // (or backfilled by migration v2 from legacy registrations). Only
+    // name/colla data lives here; DNI/phone stay in registrations.
+    match /users/{email} {
+      allow create: if (isAdmin() ||
+          (request.auth != null && request.auth.token.email == email))
+        && request.resource.data.email == email
+        && request.resource.data.keys().hasAll(
+          ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt'])
+        && request.resource.data.keys().hasOnly(
+          ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt'])
+        && request.resource.data.collaId is string
+        && exists(/databases/$(database)/documents/colles/$(request.resource.data.collaId));
+      allow read: if isAdmin()
+        || (request.auth != null && request.auth.token.email == email)
+        || capOwnsColla(resource.data.collaId)
+        || isMemberOfColla(resource.data.collaId);
+      // Users may refresh their own profile but never switch colla
+      allow update: if isAdmin() ||
+        (request.auth != null && request.auth.token.email == email
+         && request.resource.data.collaId == resource.data.collaId
+         && request.resource.data.keys().hasOnly(
+          ['email', 'name', 'surname', 'collaId', 'collaCode', 'collaName', 'regId', 'createdAt']));
+      allow delete: if isAdmin() || capOwnsColla(resource.data.collaId);
     }
 
     // Colles — public read (landing page validates the 6-char code)
@@ -47,10 +80,12 @@ service cloud.firestore {
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['pdfUrl', 'pdfName']));
     }
 
-    // Registrations — created anonymously in a single write after T&C
-    // acceptance; managed only by admins and the owning colla's caps
+    // Registrations — created by the participant's own account in a single
+    // write after T&C acceptance; managed by admins and the owning colla's caps
     match /registrations/{regId} {
-      allow create: if request.resource.data.keys().hasAll(
+      allow create: if request.auth != null
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.keys().hasAll(
           ['name', 'surname', 'idNumber', 'email', 'phone',
            'collaCode', 'collaName', 'collaId', 'tcAccepted', 'timestamp'])
         && request.resource.data.keys().hasOnly(
@@ -83,6 +118,23 @@ service cloud.firestore {
       // Orders can't be moved to another colla
       allow update: if (isAdmin() || capOwnsColla(resource.data.collaId))
         && request.resource.data.collaId == resource.data.collaId;
+    }
+
+    // Posts — colla-page content published by caps (messages/links)
+    match /posts/{postId} {
+      allow create: if (isAdmin() || capOwnsColla(request.resource.data.collaId))
+        && request.resource.data.authorEmail == request.auth.token.email
+        && request.resource.data.keys().hasAll(
+          ['collaId', 'title', 'authorEmail', 'createdAt'])
+        && request.resource.data.keys().hasOnly(
+          ['collaId', 'title', 'body', 'url', 'authorEmail', 'createdAt']);
+      allow read: if isAdmin()
+        || capOwnsColla(resource.data.collaId)
+        || isMemberOfColla(resource.data.collaId);
+      // Posts can't be moved to another colla
+      allow update: if (isAdmin() || capOwnsColla(resource.data.collaId))
+        && request.resource.data.collaId == resource.data.collaId;
+      allow delete: if isAdmin() || capOwnsColla(resource.data.collaId);
     }
 
     // Meta — migration markers etc.

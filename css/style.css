@@ -421,3 +421,47 @@ a:hover { text-decoration: underline; }
   .service-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
   .cap-subnav { flex-wrap: wrap; }
 }
+
+/* ═══════════ Publicacions / Pàgina de colla ═══════════ */
+.form-group textarea {
+  width: 100%; padding: .7rem .9rem;
+  border: 2px solid var(--border); border-radius: var(--radius);
+  font-size: .95rem; transition: border-color .2s;
+  background: #fff; resize: vertical;
+}
+.form-group textarea:focus { outline: none; border-color: var(--primary-light); }
+
+.link-btn {
+  background: none; border: none; padding: 0;
+  color: var(--primary); font-family: inherit; font-size: .85rem;
+  cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
+
+.posts-list { display: flex; flex-direction: column; gap: .8rem; }
+.post-card {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .9rem 1rem; background: var(--card); box-shadow: var(--shadow);
+}
+.post-card-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: .8rem; margin-bottom: .3rem;
+}
+.post-card-title { font-weight: 600; font-size: 1rem; }
+.post-card-date { font-size: .78rem; color: var(--text-secondary); white-space: nowrap; }
+.post-card-body { font-size: .9rem; white-space: pre-line; margin-bottom: .3rem; }
+.post-card-link { font-size: .88rem; word-break: break-all; }
+.post-card-actions { margin-top: .5rem; text-align: right; }
+
+.members-list {
+  list-style: none;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: .4rem .8rem;
+}
+.members-list li {
+  padding: .45rem .7rem; background: var(--bg);
+  border-radius: 6px; font-size: .9rem;
+}
+
+.reg-counts { font-size: .9rem; font-weight: 600; color: var(--text-secondary); }
+.reg-paid { width: 1.1rem; height: 1.1rem; cursor: pointer; accent-color: var(--success); }

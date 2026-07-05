@@ -10,23 +10,23 @@
 </head>
 <body>
 
-  <!-- ========== 1. LANDING ========== -->
-  <div id="view-landing" class="view">
+  <!-- ========== 1. REGISTER — STEP 1: COLLA CODE ========== -->
+  <div id="view-landing" class="view" hidden>
     <div class="auth-container">
       <div class="auth-card">
         <div class="auth-header">
           <div class="logo">🎭</div>
-          <h1>Registre Carnaval</h1>
-          <p class="subtitle">Introdueix el codi de 6 caràcters de la teva colla</p>
+          <h1>Registre</h1>
+          <p class="subtitle">Introdueix el codi de 6 caràcters de la teva colla per registrar-te</p>
         </div>
         <div id="landing-error" class="error-msg" hidden></div>
         <div class="form-group">
           <label for="code-input">Codi de la Colla</label>
           <input type="text" id="code-input" maxlength="6" placeholder="Ex: AB12CD" autocomplete="off" style="text-transform:uppercase; text-align:center; font-size:1.5rem; letter-spacing:.3rem;">
         </div>
-        <button id="btn-validate-code" class="btn btn-primary btn-full" style="margin-bottom:1rem;">Accedir</button>
+        <button id="btn-validate-code" class="btn btn-primary btn-full" style="margin-bottom:1rem;">Continuar</button>
         <div class="auth-switch">
-          <button id="btn-go-login" class="btn btn-outline btn-full">Sóc Cap de Colla</button>
+          <button id="btn-code-back" class="btn btn-outline btn-full">Tornar a l'inici de sessió</button>
         </div>
       </div>
     </div>
@@ -62,6 +62,21 @@
             <label for="reg-phone">Telèfon</label>
             <input type="tel" id="reg-phone" required>
           </div>
+          <div class="form-group">
+            <label for="reg-password">Contrasenya (mínim 6 caràcters)</label>
+            <div class="password-wrap">
+              <input type="password" id="reg-password" required minlength="6" autocomplete="new-password">
+              <button type="button" class="pw-eye" data-target="reg-password" title="Mostrar/amagar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="reg-password2">Repeteix la contrasenya</label>
+            <div class="password-wrap">
+              <input type="password" id="reg-password2" required minlength="6" autocomplete="new-password">
+              <button type="button" class="pw-eye" data-target="reg-password2" title="Mostrar/amagar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
+          </div>
+          <p style="font-size:.8rem;color:var(--text-secondary);margin-bottom:1rem;">Amb el correu i la contrasenya crearàs el teu compte per accedir a la pàgina de la teva colla.</p>
           <div class="form-actions">
             <button type="button" id="btn-register-back" class="btn btn-outline">Tornar</button>
             <button type="submit" class="btn btn-primary">Continuar</button>
@@ -124,20 +139,20 @@
       <div class="auth-card" style="text-align:center;">
         <div class="success-icon">✅</div>
         <h1 style="margin:.8rem 0;">Tot fet!</h1>
-        <p class="subtitle" style="margin-bottom:1.5rem;">El teu registre s'ha completat correctament.</p>
-        <button id="btn-success-home" class="btn btn-primary btn-full">Tornar a l'inici</button>
+        <p class="subtitle" style="margin-bottom:1.5rem;">El teu registre i el teu compte s'han creat correctament.</p>
+        <button id="btn-success-home" class="btn btn-primary btn-full">Anar a la pàgina de la colla</button>
       </div>
     </div>
   </div>
 
-  <!-- ========== 6. LOGIN ========== -->
-  <div id="view-login" class="view" hidden>
+  <!-- ========== 6. LOGIN (initial view) ========== -->
+  <div id="view-login" class="view">
     <div class="auth-container">
       <div class="auth-card">
         <div class="auth-header">
           <div class="logo">🎭</div>
-          <h1>Accés Cap de Colla / Admin</h1>
-          <p class="subtitle">Introdueix les teves credencials</p>
+          <h1>Registre Carnaval</h1>
+          <p class="subtitle">Inicia sessió amb el teu compte</p>
         </div>
         <div id="login-error" class="error-msg" hidden></div>
         <form id="login-form" autocomplete="off">
@@ -152,10 +167,14 @@
               <button type="button" class="pw-eye" data-target="login-password" title="Mostrar/amagar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             </div>
           </div>
-          <button type="submit" class="btn btn-primary btn-full" style="margin-bottom:1rem;">Entrar</button>
+          <button type="submit" class="btn btn-primary btn-full" style="margin-bottom:.6rem;">Entrar</button>
         </form>
+        <div style="text-align:center;margin-bottom:1rem;">
+          <button type="button" id="btn-forgot-password" class="link-btn">Has oblidat la contrasenya?</button>
+        </div>
         <div class="auth-switch">
-          <button id="btn-login-back" class="btn btn-outline btn-full">Tornar a l'inici</button>
+          <p style="margin-bottom:.5rem;">Primera vegada?</p>
+          <button id="btn-go-register" class="btn btn-outline btn-full">✍️ Registra't</button>
         </div>
       </div>
     </div>
@@ -175,12 +194,14 @@
       <div class="cap-subnav">
         <button id="btn-cap-tab-registres" class="cap-subnav-btn active">📋 Registres</button>
         <button id="btn-cap-tab-comandes" class="cap-subnav-btn">🛒 Comandes</button>
+        <button id="btn-cap-tab-publicacions" class="cap-subnav-btn">📣 Publicacions</button>
       </div>
 
       <!-- ── Section: Registres ── -->
       <div id="cap-section-registres">
       <div class="dash-header">
         <h1>Persones Registrades</h1>
+        <span id="cap-reg-counts" class="reg-counts"></span>
         <div class="dash-header-actions">
           <button id="btn-cap-export" class="btn btn-accent btn-small">📥 Exportar a Excel</button>
         </div>
@@ -207,6 +228,7 @@
               <th>DNI/NIE</th>
               <th>Correu</th>
               <th>Telèfon</th>
+              <th>Pagament</th>
               <th>Data registre</th>
               <th></th>
             </tr>
@@ -248,6 +270,62 @@
           </div>
         </div>
       </div><!-- /cap-section-comandes -->
+
+      <!-- ── Section: Publicacions ── -->
+      <div id="cap-section-publicacions" hidden>
+        <div class="dash-header">
+          <h1>Publicacions</h1>
+        </div>
+        <div class="admin-form-card">
+          <h2>📣 Nova publicació</h2>
+          <form id="cap-post-form">
+            <div class="form-group">
+              <label for="post-title">Títol</label>
+              <input type="text" id="post-title" required maxlength="120" placeholder="Ex: Assaig dissabte">
+            </div>
+            <div class="form-group">
+              <label for="post-body">Missatge (opcional)</label>
+              <textarea id="post-body" rows="4" maxlength="2000"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="post-url">Enllaç (opcional)</label>
+              <input type="url" id="post-url" placeholder="https://...">
+            </div>
+            <button type="submit" class="btn btn-primary">Publicar</button>
+          </form>
+        </div>
+        <div class="admin-form-card">
+          <h2>📜 Publicacions de la colla</h2>
+          <div id="cap-posts-list" class="posts-list"></div>
+          <p id="cap-posts-empty" class="table-empty" hidden>Encara no hi ha publicacions.</p>
+        </div>
+      </div><!-- /cap-section-publicacions -->
+    </div>
+  </div>
+
+  <!-- ========== 7b. USER (MEMBER) DASHBOARD ========== -->
+  <div id="view-user-dashboard" class="view" hidden>
+    <nav class="topnav">
+      <div class="topnav-logo">🎭 Registre Carnaval</div>
+      <div class="topnav-right">
+        <span class="nav-user" id="user-user-label"></span>
+        <button id="btn-user-logout" class="btn btn-small btn-outline" style="color:#fff;border-color:rgba(255,255,255,.3);">Tancar sessió</button>
+      </div>
+    </nav>
+    <div class="dashboard-content">
+      <div class="dash-header">
+        <h1 id="user-colla-title">La meva colla</h1>
+      </div>
+      <div class="admin-form-card">
+        <h2>📣 Publicacions</h2>
+        <div id="user-posts-list" class="posts-list"></div>
+        <p id="user-posts-empty" class="table-empty" hidden>Encara no hi ha publicacions.</p>
+      </div>
+      <div class="admin-form-card">
+        <h2>👥 Membres de la colla</h2>
+        <ul id="user-members-list" class="members-list"></ul>
+        <p id="user-members-empty" class="table-empty" hidden>Encara no hi ha membres.</p>
+      </div>
     </div>
   </div>
 

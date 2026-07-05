@@ -4,19 +4,20 @@ Rolling architecture + changelog document. **Update after every code change.** C
 
 ## What this app is
 
-Public registration + supply-ordering app for carnival groups ("colles"), Catalan UI only.
+Account-based registration + supply-ordering app for carnival groups ("colles"), Catalan UI only. The app opens on a **login page**; first-timers register via a "Registra't" button.
 
-- **Participants** (anonymous): enter a 6-char colla code → personal-data form (nom, cognoms, DNI/NIE, correu, telèfon) → confirm → scroll-read T&C → accept. The registration is written to Firestore **only at acceptance** (single `create` with `tcAccepted: true`).
-- **Caps de colla** (email/password login): per-colla dashboard — registered people (view/delete/Excel), per-colla T&C PDF upload, and **Comandes**: order supplies (gel, menjar, beguda…) from the admin-managed catalog, with order history.
+- **Participants / members** (email+password account): register with a 6-char colla code → personal-data form (nom, cognoms, DNI/NIE, correu, telèfon, contrasenya) → confirm → scroll-read T&C → accept. **Only at acceptance** the Auth account is created and the registration + `users/{email}` profile are written. Logged-in members see their **colla page**: cap-published posts (messages/links) and the names of fellow members.
+- **Caps de colla** (email/password login): per-colla dashboard — registered people (view/delete/Excel, **Pagament checkbox per person + registered/paid counters**), per-colla T&C PDF upload, **Comandes** (order supplies from the admin-managed catalog, with history), and **Publicacions** (post title/message/link to the colla page).
 - **Admins** (`marna96@gmail.com`, `said@magmamedia.cat`, hardcoded in rules): manage caps (creation sends a set-password email; no passwords stored anywhere), colles (6-char code generation, cap assignment), all registrations, the services catalog, and all orders with aggregated shopping-list totals + two-sheet Excel export.
+- Role routing on login: `admins/{email}` → admin, else `caps/{email}` → cap, else `users/{email}` → member, else sign-out. The login page has a self-service "Has oblidat la contrasenya?" reset link.
 
 ## Architecture
 
 No build step, no framework, no tests. Three files:
 
-- `index.html` — all views as sibling `<div class="view">` blocks toggled by `showView(id)`; admin dashboard uses sidebar `data-admin-tab` switching; cap dashboard has a Registres/Comandes sub-nav.
+- `index.html` — all views as sibling `<div class="view">` blocks toggled by `showView(id)`; initial view is `view-login` (`view-landing` is now register step 1: colla code entry); admin dashboard uses sidebar `data-admin-tab` switching; cap dashboard has a Registres/Comandes/Publicacions sub-nav; members get `view-user-dashboard`.
 - `js/firebase-config.js` — Firebase compat SDK init (`auth`, `db`, `storage` globals). Project `registre-carnaval`.
-- `js/app.js` — one IIFE. Module-level state: `currentUser/currentRole`, `pendingRegistration`, `capColles`, `capActiveCollaId`, `servicesCache`, `adminOrdersCache`, `editingServiceId`. Role routing in `onAuthStateChanged`: `admins/{email}` doc → admin; `caps/{email}` doc → cap; else sign out.
+- `js/app.js` — one IIFE. Module-level state: `currentUser/currentRole/currentUserProfile`, `pendingRegistration` + `pendingPassword` (password kept out of the Firestore write), `registrationInProgress` (suppresses auth routing mid-signup), `capColles`, `capActiveCollaId`, `servicesCache`, `adminOrdersCache`, `editingServiceId`. Role routing in `routeUser()` (called by `onAuthStateChanged`): `admins/{email}` → admin; `caps/{email}` → cap; `users/{email}` → member; else sign out.
 
 CDN deps: Firebase 10 compat, SheetJS (Excel), Google Fonts (Oswald). After editing app.js: `node --check js/app.js` is the only safety net.
 
@@ -27,12 +28,14 @@ CDN deps: Firebase 10 compat, SheetJS (Excel), Google Fonts (Oswald). After edit
 | `admins/{email}` | `{ email }` | read: own/admin · write: admin |
 | `caps/{email}` | `{ email, name, createdAt }` — **doc ID = email** (rules depend on it) | read: own/admin · write: admin |
 | `colles/{autoId}` | `{ name, code, capEmails[], pdfUrl?, pdfName?, createdAt }` | read: public (landing code check) · create/delete: admin · update: admin, or assigned cap touching only `pdfUrl`/`pdfName` |
-| `registrations/{autoId}` | `{ name, surname, idNumber, email, phone, collaCode, collaName, collaId, tcAccepted, timestamp }` | create: public but validated (exact keys, `tcAccepted==true`, colla exists) · read/update/delete: admin or owning-colla cap |
+| `users/{email}` | `{ email, name, surname, collaId, collaCode, collaName, regId, createdAt }` — **doc ID = email**; `regId` links to the person's registration | create: own account (or admin, for backfill), exact keys, colla exists · read: own/admin/owning cap/same-colla member · update: admin, or own with `collaId` unchanged · delete: admin or owning cap |
+| `registrations/{autoId}` | `{ name, surname, idNumber, email, phone, collaCode, collaName, collaId, tcAccepted, timestamp, paid? }` — `paid` set by the cap's Pagament checkbox | create: authenticated, `email` must match the account, exact keys, `tcAccepted==true`, colla exists · read/update/delete: admin or owning-colla cap (members can never read) |
+| `posts/{autoId}` | `{ collaId, title, body?, url?, authorEmail, createdAt }` | create: admin or owning cap (authorEmail = own) · read: admin/owning cap/same-colla member · update: same, `collaId` immutable · delete: admin or owning cap |
 | `services/{autoId}` | `{ name, price:number, unit, category, imageUrl?, imagePath?, link?, createdAt }` | read: any authed · write: admin |
 | `orders/{autoId}` | `{ collaId, collaCode, collaName, capEmail, items[{serviceId, serviceName, unitPrice, unit, category, quantity}], total, createdAt, updatedAt }` — items snapshot prices | create: owning cap (capEmail must match) or admin, exact keys · read/delete: admin or owning cap · update: same + `collaId` immutable |
 | `meta/{docId}` | migration markers (`migrations: {v}`) | admin only |
 
-**Cap scoping mechanism**: `capOwnsColla(collaId)` in rules does `auth.email in get(/colles/$(collaId)).data.capEmails`. This works for list queries **only** because cap queries filter `where('collaId','==', …)` — an equality filter the rules engine can bind. Composite indexes required: `registrations(collaId ASC, timestamp DESC)`, `orders(collaId ASC, createdAt DESC)`.
+**Cap scoping mechanism**: `capOwnsColla(collaId)` in rules does `auth.email in get(/colles/$(collaId)).data.capEmails`. Member scoping works the same way via `isMemberOfColla(collaId)`: `get(/users/$(auth.email)).data.collaId == collaId`. Both work for list queries **only** because clients filter `where('collaId','==', …)` — an equality filter the rules engine can bind. Composite indexes required: `registrations(collaId ASC, timestamp DESC)`, `orders(collaId ASC, createdAt DESC)`, `posts(collaId ASC, createdAt DESC)`.
 
 **Storage**: `terms/{collaId}/…` (T&C PDFs; public read, cap/admin write via cross-service Firestore check) and `services/…` (catalog images; public read, admin write, ≤5 MB image/*).
 
@@ -48,13 +51,24 @@ Git is the source of truth for everything.
 ## Known issues / accepted trade-offs
 
 - **Stale JS after deploys**: GitHub Pages offers no cache control, and rules changes can break cached old frontends (2026-07-05: a cap got "Error carregant registres" because cached JS still queried by `collaCode`, which the new rules reject; fixed by hard refresh). If this recurs, the fix is moving hosting to Firebase Hosting with no-cache headers (considered 2026-07-05, deferred).
-- `colles` is publicly readable (needed for landing code validation) → colla names + cap emails are enumerable.
-- Anonymous `registrations` create is open (validated shape only) — App Check would be the next step if spam appears.
-- Old registrations whose colla was deleted have no `collaId` → invisible to caps, admin-only.
-- Existing caps kept their pre-overhaul Auth passwords; recovery path is the admin "🔁 Correu contrasenya" button.
+- `colles` is publicly readable (needed for register-code validation) → colla names + cap emails are enumerable.
+- `users` docs are keyed by (and contain) email → **colla members can see each other's emails**, not just names (unavoidable: backfilled legacy people have no Auth uid). DNI/phone stay cap/admin-only in `registrations`.
+- One account = one person = one colla. Duplicate emails across legacy registrations: the v2 backfill keeps the first; a person in two colles isn't supported (signup links the account to the existing colla and shows an info toast).
+- A cap who also registers as a participant routes to the cap dashboard (role precedence admin > cap > user).
+- Old registrations whose colla was deleted have no `collaId` (or a dangling one) → invisible to caps and skipped by the v2 backfill, admin-only.
+- Existing caps kept their pre-overhaul Auth passwords; recovery paths are the login page's "Has oblidat la contrasenya?" link and the admin "🔁 Correu contrasenya" button.
 - Legacy composite index `registrations(collaCode, timestamp)` still exists in console; delete after a few days (stale cached frontends).
 
 ## Changelog
+
+### 2026-07-05 (later still) — Account-based registration, colla page, Pagament — **NOT YET DEPLOYED**
+- **Login-first entry**: app opens on the login page; "Sóc Cap de Colla" removed (roles come from data); "Registra't" starts the register flow (colla code → form with password → confirm → T&C). The Auth account + `registrations` doc + `users/{email}` profile are all created only at T&C acceptance; `registrationInProgress` flag keeps the auth listener from routing mid-signup. Anonymous registration is gone — the `registrations` create rule now requires auth + email match (App Check idea moot).
+- **New member role + colla page** (`view-user-dashboard`): cap-published posts (title/message/http(s) link, newest first) and member name list (from `users`, sorted client-side). New `posts` collection + `users` collection with `isMemberOfColla()` rule scoping. **New composite index needed: `posts(collaId ASC, createdAt DESC)`.**
+- **Cap Publicacions tab**: post form + list with delete, per active colla (sub-nav refactored to 3 tabs).
+- **Pagament tracking**: checkbox per registration in the cap table (writes `paid` bool), 👥 registered / 💰 paid counters in the header, Pagament column in the cap Excel export.
+- **Migration v2** (runs on next admin login): backfills `users/{email}` profiles from legacy registrations (skips deleted colles, first email wins) so legacy names appear in member lists and a later signup **links** to the existing registration instead of duplicating (`regId` match). Deleting a registration (cap or admin) also deletes the linked profile.
+- Login page got a self-service "Has oblidat la contrasenya?" reset link.
+- Deploy checklist: create the `posts` index → `./deploy.sh` (rules) → push (frontend) → admin login to run migration v2. Line endings of the four edited files were normalized to LF (repo had mixed CRLF).
 
 ### 2026-07-05 (later) — Comandes feature rebuilt (`4bf2c66`, `b4fcd1c`) — deployed + cap flow verified live same day
 - Rebuilt the lost orders feature from surviving Firestore data (`services` + `orders` collections; original code was never committed).

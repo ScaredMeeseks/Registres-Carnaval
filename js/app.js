@@ -10,11 +10,14 @@
 
   // ─── State ──────────────────────────────────────────────────
   let currentUser = null;   // firebase.User
-  let currentRole = null;   // 'admin' | 'cap'
+  let currentRole = null;   // 'admin' | 'cap' | 'user'
+  let currentUserProfile = null;    // users/{email} doc data (normal users)
   let currentCollaCode = null;      // selected colla code for registration
   let currentCollaName = null;
   let currentCollaId = null;        // Firestore doc id of selected colla
   let pendingRegistration = null;   // temp object before T&C
+  let pendingPassword = null;       // account password during signup — memory only, never written
+  let registrationInProgress = false; // suppress auth routing while signup docs are written
   let capColles = [];               // colles assigned to current cap
   let servicesCache = [];           // orderable services catalog (caps + admin)
   let capActiveCollaId = null;      // colla selected in the cap dashboard tabs
@@ -84,12 +87,12 @@
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  1. LANDING — Code validation
+  //  1. REGISTER STEP 1 — Colla code validation
   // ═══════════════════════════════════════════════════════════
   function initLanding() {
     const input = $('#code-input');
     const btnValidate = $('#btn-validate-code');
-    const btnLogin = $('#btn-go-login');
+    const btnBack = $('#btn-code-back');
     const error = $('#landing-error');
 
     // Auto-uppercase
@@ -133,7 +136,8 @@
       if (e.key === 'Enter') btnValidate.click();
     });
 
-    btnLogin.addEventListener('click', () => {
+    btnBack.addEventListener('click', () => {
+      error.hidden = true;
       showView('view-login');
     });
   }
@@ -153,14 +157,16 @@
       e.preventDefault();
       error.hidden = true;
 
-      const name    = $('#reg-name').value.trim();
-      const surname = $('#reg-surname').value.trim();
-      const id      = $('#reg-id').value.trim();
-      const email   = $('#reg-email').value.trim();
-      const phone   = $('#reg-phone').value.trim();
+      const name      = $('#reg-name').value.trim();
+      const surname   = $('#reg-surname').value.trim();
+      const id        = $('#reg-id').value.trim();
+      const email     = $('#reg-email').value.trim().toLowerCase();
+      const phone     = $('#reg-phone').value.trim();
+      const password  = $('#reg-password').value;
+      const password2 = $('#reg-password2').value;
 
       // Validation
-      if (!name || !surname || !id || !email || !phone) {
+      if (!name || !surname || !id || !email || !phone || !password) {
         error.textContent = 'Tots els camps són obligatoris.';
         error.hidden = false;
         return;
@@ -175,7 +181,20 @@
         error.hidden = false;
         return;
       }
+      if (password.length < 6) {
+        error.textContent = 'La contrasenya ha de tenir com a mínim 6 caràcters.';
+        error.hidden = false;
+        return;
+      }
+      if (password !== password2) {
+        error.textContent = 'Les contrasenyes no coincideixen.';
+        error.hidden = false;
+        return;
+      }
 
+      // Password is kept out of pendingRegistration: that object is spread
+      // straight into the Firestore write and must never carry it
+      pendingPassword = password;
       pendingRegistration = { name, surname, idNumber: id, email, phone, collaCode: currentCollaCode, collaName: currentCollaName, collaId: currentCollaId };
 
       // Show confirmation
@@ -250,17 +269,59 @@
       if (!checkbox.checked || !reg) return;
       pendingRegistration = null; // guard against double-click double writes
       showLoading();
+      // Account creation fires onAuthStateChanged before the profile docs
+      // exist — the listener must not route (and sign out) mid-signup
+      registrationInProgress = true;
       try {
-        await db.collection('registrations').add({
-          ...reg,
-          tcAccepted: true,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        // 1. Create the Auth account (skip when retrying after a partial failure)
+        if (!auth.currentUser || (auth.currentUser.email || '').toLowerCase() !== reg.email) {
+          await auth.createUserWithEmailAndPassword(reg.email, pendingPassword);
+        }
+
+        // 2. A profile with a regId means this person is already registered
+        //    (backfilled legacy registration) — link the account, don't duplicate
+        const profileRef = db.collection('users').doc(reg.email);
+        const profileSnap = await profileRef.get();
+        const existing = profileSnap.exists ? profileSnap.data() : null;
+
+        if (existing && existing.regId) {
+          await profileRef.set({ name: reg.name, surname: reg.surname }, { merge: true });
+          if (existing.collaId !== reg.collaId) {
+            toast(`Aquest correu ja estava registrat a la colla "${existing.collaName || existing.collaCode || ''}". El compte s'ha vinculat a aquella colla.`, 'info');
+          }
+        } else {
+          const regDoc = await db.collection('registrations').add({
+            ...reg,
+            tcAccepted: true,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await profileRef.set({
+            email: reg.email,
+            name: reg.name,
+            surname: reg.surname,
+            collaId: reg.collaId,
+            collaCode: reg.collaCode,
+            collaName: reg.collaName,
+            regId: regDoc.id,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        }
+
+        pendingPassword = null;
+        registrationInProgress = false;
         showView('view-success');
         $('#register-form').reset();
       } catch (e) {
+        registrationInProgress = false;
         pendingRegistration = reg; // restore so the user can retry
-        toast('Error desant. Torna-ho a provar.', 'error');
+        let msg = 'Error desant. Torna-ho a provar.';
+        if (e.code === 'auth/email-already-in-use') {
+          msg = 'Ja existeix un compte amb aquest correu. Inicia sessió.';
+          showView('view-login'); // the terms view has no way back
+        } else if (e.code === 'auth/weak-password') {
+          msg = 'La contrasenya és massa dèbil (mínim 6 caràcters).';
+        }
+        toast(msg, 'error');
         console.error(e);
       }
       hideLoading();
@@ -291,12 +352,17 @@
   //  5. SUCCESS
   // ═══════════════════════════════════════════════════════════
   function initSuccess() {
-    $('#btn-success-home').addEventListener('click', () => {
+    $('#btn-success-home').addEventListener('click', async () => {
       currentCollaCode = null;
       currentCollaName = null;
       currentCollaId = null;
       $('#code-input').value = '';
-      showView('view-landing');
+      if (auth.currentUser) {
+        showLoading();
+        await routeUser(auth.currentUser);
+      } else {
+        showView('view-login');
+      }
     });
   }
 
@@ -319,10 +385,31 @@
       });
     });
 
-    $('#btn-login-back').addEventListener('click', () => {
-      showView('view-landing');
+    // First-time users go to the register flow (colla code first)
+    $('#btn-go-register').addEventListener('click', () => {
       error.hidden = true;
-      form.reset();
+      showView('view-landing');
+    });
+
+    // Self-service password reset (serves participants and caps alike)
+    $('#btn-forgot-password').addEventListener('click', async () => {
+      const email = $('#login-email').value.trim().toLowerCase();
+      if (!email) {
+        error.textContent = 'Escriu el teu correu al camp de dalt i torna a clicar l\'enllaç.';
+        error.hidden = false;
+        return;
+      }
+      showLoading();
+      try {
+        await auth.sendPasswordResetEmail(email);
+        error.hidden = true;
+        toast(`Correu de restabliment enviat a ${email}.`, 'success');
+      } catch (e) {
+        error.textContent = 'No s\'ha pogut enviar el correu de restabliment.';
+        error.hidden = false;
+        console.error(e);
+      }
+      hideLoading();
     });
 
     form.addEventListener('submit', async e => {
@@ -357,51 +444,66 @@
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  AUTH STATE LISTENER — routes to correct dashboard
+  //  AUTH ROUTING — admin > cap > user, else sign out
   // ═══════════════════════════════════════════════════════════
+  async function routeUser(user) {
+    currentUser = user;
+    const email = user.email.toLowerCase();
+
+    // Check if admin
+    const adminDoc = await db.collection('admins').doc(email).get();
+    if (adminDoc.exists) {
+      currentRole = 'admin';
+      $('#admin-user-label').textContent = email;
+      showView('view-admin-dashboard');
+      await runMigrations();
+      loadAdminData();
+      hideLoading();
+      return;
+    }
+
+    // Check if cap de colla (caps are keyed by email)
+    const capDoc = await db.collection('caps').doc(email).get();
+    if (capDoc.exists) {
+      currentRole = 'cap';
+      const capData = capDoc.data();
+      $('#cap-user-label').textContent = capData.name || email;
+      showView('view-cap-dashboard');
+      loadCapData(email);
+      hideLoading();
+      return;
+    }
+
+    // Check if registered member (users are keyed by email)
+    const profileDoc = await db.collection('users').doc(email).get();
+    if (profileDoc.exists) {
+      currentRole = 'user';
+      currentUserProfile = { id: profileDoc.id, ...profileDoc.data() };
+      $('#user-user-label').textContent = currentUserProfile.name || email;
+      showView('view-user-dashboard');
+      loadUserData();
+      hideLoading();
+      return;
+    }
+
+    // Unknown role — sign out
+    toast('No tens permisos per accedir.', 'error');
+    await auth.signOut();
+    hideLoading();
+  }
+
   function initAuthListener() {
     auth.onAuthStateChanged(async user => {
+      // Mid-signup the account exists but the profile docs don't yet —
+      // routing now would hit the sign-out branch
+      if (registrationInProgress) return;
       if (!user) {
         currentUser = null;
         currentRole = null;
+        currentUserProfile = null;
         return;
       }
-
-      currentUser = user;
-      const email = user.email.toLowerCase();
-
-      // Check if admin
-      const adminDoc = await db.collection('admins').doc(email).get();
-      const isAdmin = adminDoc.exists;
-
-      // Check if also cap de colla (caps are keyed by email)
-      const capDoc = await db.collection('caps').doc(email).get();
-      const isCap = capDoc.exists;
-
-      if (isAdmin) {
-        currentRole = 'admin';
-        $('#admin-user-label').textContent = email;
-        showView('view-admin-dashboard');
-        await runMigrations();
-        loadAdminData();
-        hideLoading();
-        return;
-      }
-
-      if (isCap) {
-        currentRole = 'cap';
-        const capData = capDoc.data();
-        $('#cap-user-label').textContent = capData.name || email;
-        showView('view-cap-dashboard');
-        loadCapData(email);
-        hideLoading();
-        return;
-      }
-
-      // Unknown role — sign out
-      toast('No tens permisos per accedir.', 'error');
-      await auth.signOut();
-      hideLoading();
+      await routeUser(user);
     });
   }
 
@@ -411,39 +513,72 @@
   async function runMigrations() {
     try {
       const marker = await db.collection('meta').doc('migrations').get();
-      if (marker.exists && marker.data().v >= 1) return;
+      const version = marker.exists ? (marker.data().v || 0) : 0;
+      if (version >= 2) return;
 
-      // 1. Caps: re-key docs by email, drop stored plaintext passwords
-      const capsSnap = await db.collection('caps').get();
-      for (const doc of capsSnap.docs) {
-        const d = doc.data();
-        if (!d.email) continue;
-        if (doc.id !== d.email) {
-          const { plainPassword, ...rest } = d;
-          await db.collection('caps').doc(d.email).set(rest, { merge: true });
-          await doc.ref.delete();
-        } else if (d.plainPassword !== undefined) {
-          await doc.ref.update({ plainPassword: firebase.firestore.FieldValue.delete() });
+      if (version < 1) {
+        // v1.1. Caps: re-key docs by email, drop stored plaintext passwords
+        const capsSnap = await db.collection('caps').get();
+        for (const doc of capsSnap.docs) {
+          const d = doc.data();
+          if (!d.email) continue;
+          if (doc.id !== d.email) {
+            const { plainPassword, ...rest } = d;
+            await db.collection('caps').doc(d.email).set(rest, { merge: true });
+            await doc.ref.delete();
+          } else if (d.plainPassword !== undefined) {
+            await doc.ref.update({ plainPassword: firebase.firestore.FieldValue.delete() });
+          }
+        }
+
+        // v1.2. Registrations: backfill collaId from collaCode
+        const collesSnap = await db.collection('colles').get();
+        const codeToId = {};
+        collesSnap.docs.forEach(c => { codeToId[c.data().code] = c.id; });
+        const regsSnap = await db.collection('registrations').get();
+        for (const doc of regsSnap.docs) {
+          const d = doc.data();
+          if (!d.collaId && codeToId[d.collaCode]) {
+            await doc.ref.update({ collaId: codeToId[d.collaCode] });
+          }
         }
       }
 
-      // 2. Registrations: backfill collaId from collaCode
-      const collesSnap = await db.collection('colles').get();
-      const codeToId = {};
-      collesSnap.docs.forEach(c => { codeToId[c.data().code] = c.id; });
-      const regsSnap = await db.collection('registrations').get();
-      for (const doc of regsSnap.docs) {
-        const d = doc.data();
-        if (!d.collaId && codeToId[d.collaCode]) {
-          await doc.ref.update({ collaId: codeToId[d.collaCode] });
+      if (version < 2) {
+        // v2. Backfill users/{email} member profiles from legacy registrations
+        // so their names show in colla member lists and a later signup links
+        // to the existing registration. Duplicate emails: first one wins.
+        // Registrations pointing at deleted colles are skipped — the create
+        // rule requires the colla to exist and one failure would abort the loop.
+        const collesSnap2 = await db.collection('colles').get();
+        const collaIds = {};
+        collesSnap2.docs.forEach(c => { collaIds[c.id] = true; });
+        const regsSnap = await db.collection('registrations').get();
+        for (const doc of regsSnap.docs) {
+          const d = doc.data();
+          if (!d.email || !d.collaId || !collaIds[d.collaId]) continue;
+          const email = d.email.toLowerCase();
+          const ref = db.collection('users').doc(email);
+          const existing = await ref.get();
+          if (existing.exists) continue;
+          await ref.set({
+            email: email,
+            name: d.name || '',
+            surname: d.surname || '',
+            collaId: d.collaId,
+            collaCode: d.collaCode || '',
+            collaName: d.collaName || '',
+            regId: doc.id,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
         }
       }
 
       await db.collection('meta').doc('migrations').set({
-        v: 1,
+        v: 2,
         ranAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      console.log('Migrations v1 completed');
+      console.log('Migrations completed (v2)');
     } catch (e) {
       console.warn('Migration error:', e);
     }
@@ -470,11 +605,12 @@
       // Render colla tabs
       renderCollaTabs();
       capActiveCollaId = capColles[0].id;
-      // Load registrations + orders for the first colla by default
+      // Load registrations + orders + posts for the first colla by default
       await loadServices();
       renderOrderCatalog();
       await loadCapRegistrations(capActiveCollaId);
       loadCapOrders(capActiveCollaId);
+      loadCapPosts(capActiveCollaId);
     } catch (e) {
       toast('Error carregant dades.', 'error');
       console.error(e);
@@ -497,6 +633,7 @@
         capActiveCollaId = colla.id;
         loadCapRegistrations(colla.id);
         loadCapOrders(colla.id);
+        loadCapPosts(colla.id);
         updatePdfStatus(colla.id);
       });
       container.appendChild(btn);
@@ -511,6 +648,7 @@
     const tbody = $('#cap-table-body');
     const empty = $('#cap-table-empty');
     tbody.innerHTML = '';
+    updateCapRegCounts();
 
     try {
       // Query by collaId: security rules verify cap membership via the colla doc
@@ -534,14 +672,37 @@
           <td>${escapeHtml(d.idNumber)}</td>
           <td>${escapeHtml(d.email)}</td>
           <td>${escapeHtml(d.phone)}</td>
+          <td><input type="checkbox" class="reg-paid" data-id="${doc.id}" ${d.paid ? 'checked' : ''} title="Pagament"></td>
           <td>${formatTimestamp(d.timestamp)}</td>
           <td><button class="btn btn-danger btn-small btn-delete-reg" data-id="${doc.id}">Eliminar</button></td>
         `;
+        // dataset assignment keeps user-provided emails out of the HTML string
+        tr.querySelector('.btn-delete-reg').dataset.email = d.email || '';
         tbody.appendChild(tr);
       });
+      updateCapRegCounts();
     } catch (e) {
       toast('Error carregant registres.', 'error');
       console.error(e);
+    }
+  }
+
+  // Counts above the Pagament column: total registered / total paid
+  function updateCapRegCounts() {
+    const boxes = $$('#cap-table-body .reg-paid');
+    const paid = boxes.filter(b => b.checked).length;
+    $('#cap-reg-counts').textContent = `👥 ${boxes.length} registrats · 💰 ${paid} pagaments`;
+  }
+
+  // Remove the member profile linked to a deleted registration (best effort)
+  async function removeLinkedProfile(email, regId) {
+    if (!email) return;
+    try {
+      const ref = db.collection('users').doc(email.toLowerCase());
+      const snap = await ref.get();
+      if (snap.exists && snap.data().regId === regId) await ref.delete();
+    } catch (e) {
+      console.warn('Could not remove linked member profile:', e);
     }
   }
 
@@ -549,7 +710,7 @@
     // Logout
     $('#btn-cap-logout').addEventListener('click', async () => {
       await auth.signOut();
-      showView('view-landing');
+      showView('view-login');
     });
 
     // Delete registration (delegated)
@@ -560,8 +721,10 @@
       showLoading();
       try {
         await db.collection('registrations').doc(btn.dataset.id).delete();
+        await removeLinkedProfile(btn.dataset.email, btn.dataset.id);
         btn.closest('tr').remove();
         toast('Registre eliminat.', 'success');
+        updateCapRegCounts();
         // Check if table is now empty
         if ($('#cap-table-body').children.length === 0) {
           $('#cap-table-empty').hidden = false;
@@ -571,6 +734,23 @@
         console.error(e);
       }
       hideLoading();
+    });
+
+    // Pagament checkbox (delegated)
+    $('#cap-table-body').addEventListener('change', async e => {
+      const box = e.target.closest('.reg-paid');
+      if (!box) return;
+      const paid = box.checked;
+      box.disabled = true;
+      try {
+        await db.collection('registrations').doc(box.dataset.id).update({ paid: paid });
+        updateCapRegCounts();
+      } catch (err) {
+        box.checked = !paid; // revert
+        toast('Error desant el pagament.', 'error');
+        console.error(err);
+      }
+      box.disabled = false;
     });
 
     // Export to Excel
@@ -683,6 +863,7 @@
           'DNI/NIE/Passaport': d.idNumber,
           'Correu': d.email,
           'Telèfon': d.phone,
+          'Pagament': d.paid ? 'Sí' : 'No',
           'Colla': d.collaName || '',
           'Data registre': formatTimestamp(d.timestamp)
         };
@@ -851,21 +1032,24 @@
     }
   }
 
-  function initCapOrders() {
-    // Sub-nav: Registres / Comandes
-    const btnReg = $('#btn-cap-tab-registres');
-    const btnCom = $('#btn-cap-tab-comandes');
-    btnReg.addEventListener('click', () => {
-      btnReg.classList.add('active'); btnCom.classList.remove('active');
-      $('#cap-section-registres').hidden = false;
-      $('#cap-section-comandes').hidden = true;
+  // Sub-nav: Registres / Comandes / Publicacions
+  function initCapSubnav() {
+    const tabs = [
+      { btn: '#btn-cap-tab-registres', section: '#cap-section-registres' },
+      { btn: '#btn-cap-tab-comandes', section: '#cap-section-comandes' },
+      { btn: '#btn-cap-tab-publicacions', section: '#cap-section-publicacions' }
+    ];
+    tabs.forEach(t => {
+      $(t.btn).addEventListener('click', () => {
+        tabs.forEach(o => {
+          $(o.btn).classList.toggle('active', o === t);
+          $(o.section).hidden = o !== t;
+        });
+      });
     });
-    btnCom.addEventListener('click', () => {
-      btnCom.classList.add('active'); btnReg.classList.remove('active');
-      $('#cap-section-registres').hidden = true;
-      $('#cap-section-comandes').hidden = false;
-    });
+  }
 
+  function initCapOrders() {
     // Live total while typing quantities (delegated)
     $('#cap-service-catalog').addEventListener('input', e => {
       if (e.target.classList.contains('service-qty')) updateOrderTotal();
@@ -892,6 +1076,147 @@
   }
 
   // ═══════════════════════════════════════════════════════════
+  //  7c. PUBLICACIONS (CAP) — colla-page posts
+  // ═══════════════════════════════════════════════════════════
+  // Shared renderer: cap list (with delete) and user feed (read-only)
+  function renderPostsList(container, emptyEl, posts, withDelete) {
+    container.innerHTML = '';
+    emptyEl.hidden = posts.length > 0;
+    posts.forEach(p => {
+      // Only render http(s) links — anything else is dropped
+      const url = (p.url && /^https?:\/\//i.test(p.url)) ? p.url : null;
+      const card = document.createElement('div');
+      card.className = 'post-card';
+      card.innerHTML = `
+        <div class="post-card-head">
+          <span class="post-card-title">${escapeHtml(p.title)}</span>
+          <span class="post-card-date">${formatTimestamp(p.createdAt)}</span>
+        </div>
+        ${p.body ? `<p class="post-card-body">${escapeHtml(p.body)}</p>` : ''}
+        ${url ? `<a class="post-card-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">🔗 ${escapeHtml(url)}</a>` : ''}
+        ${withDelete ? `<div class="post-card-actions"><button class="btn btn-danger btn-small btn-delete-post" data-id="${p.id}">Eliminar</button></div>` : ''}
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  async function loadCapPosts(collaId) {
+    try {
+      const snap = await db.collection('posts')
+        .where('collaId', '==', collaId)
+        .orderBy('createdAt', 'desc')
+        .get();
+      renderPostsList($('#cap-posts-list'), $('#cap-posts-empty'),
+        snap.docs.map(d => ({ id: d.id, ...d.data() })), true);
+    } catch (e) {
+      toast('Error carregant publicacions.', 'error');
+      console.error(e);
+    }
+  }
+
+  function initCapPosts() {
+    $('#cap-post-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!capActiveCollaId) { toast('Selecciona una colla primer.', 'error'); return; }
+      const title = $('#post-title').value.trim();
+      const body = $('#post-body').value.trim();
+      const url = $('#post-url').value.trim();
+      if (!title) return;
+      if (url && !/^https?:\/\//i.test(url)) {
+        toast('L\'enllaç ha de començar per http:// o https://', 'error');
+        return;
+      }
+      showLoading();
+      try {
+        const data = {
+          collaId: capActiveCollaId,
+          title: title,
+          authorEmail: currentUser.email.toLowerCase(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if (body) data.body = body;
+        if (url) data.url = url;
+        await db.collection('posts').add(data);
+        toast('Publicació creada.', 'success');
+        $('#cap-post-form').reset();
+        loadCapPosts(capActiveCollaId);
+      } catch (err) {
+        toast('Error creant la publicació.', 'error');
+        console.error(err);
+      }
+      hideLoading();
+    });
+
+    // Delete post (delegated)
+    $('#cap-posts-list').addEventListener('click', async e => {
+      const btn = e.target.closest('.btn-delete-post');
+      if (!btn) return;
+      if (!confirm('Segur que vols eliminar aquesta publicació?')) return;
+      showLoading();
+      try {
+        await db.collection('posts').doc(btn.dataset.id).delete();
+        toast('Publicació eliminada.', 'success');
+        loadCapPosts(capActiveCollaId);
+      } catch (err) {
+        toast('Error eliminant.', 'error');
+        console.error(err);
+      }
+      hideLoading();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  7d. USER (MEMBER) DASHBOARD — colla page
+  // ═══════════════════════════════════════════════════════════
+  async function loadUserData() {
+    const p = currentUserProfile;
+    if (!p || !p.collaId) return;
+    $('#user-colla-title').textContent = p.collaName
+      ? `${p.collaName} (${p.collaCode || ''})`
+      : 'La meva colla';
+    showLoading();
+    try {
+      const [postsSnap, membersSnap] = await Promise.all([
+        db.collection('posts')
+          .where('collaId', '==', p.collaId)
+          .orderBy('createdAt', 'desc')
+          .get(),
+        db.collection('users')
+          .where('collaId', '==', p.collaId)
+          .get()
+      ]);
+
+      renderPostsList($('#user-posts-list'), $('#user-posts-empty'),
+        postsSnap.docs.map(d => ({ id: d.id, ...d.data() })), false);
+
+      const members = membersSnap.docs
+        .map(d => d.data())
+        .sort((a, b) =>
+          (a.name || '').localeCompare(b.name || '') ||
+          (a.surname || '').localeCompare(b.surname || ''));
+      const list = $('#user-members-list');
+      list.innerHTML = '';
+      $('#user-members-empty').hidden = members.length > 0;
+      members.forEach(m => {
+        const li = document.createElement('li');
+        li.textContent = `${m.name || ''} ${m.surname || ''}`.trim();
+        list.appendChild(li);
+      });
+    } catch (e) {
+      toast('Error carregant la pàgina de la colla.', 'error');
+      console.error(e);
+    }
+    hideLoading();
+  }
+
+  function initUserDashboard() {
+    $('#btn-user-logout').addEventListener('click', async () => {
+      await auth.signOut();
+      showView('view-login');
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
   //  8. ADMIN DASHBOARD
   // ═══════════════════════════════════════════════════════════
   function initAdminDashboard() {
@@ -909,7 +1234,7 @@
     // Logout
     $('#btn-admin-logout').addEventListener('click', async () => {
       await auth.signOut();
-      showView('view-landing');
+      showView('view-login');
     });
 
     // ── Add Cap de Colla ──
@@ -1108,6 +1433,7 @@
       showLoading();
       try {
         await db.collection('registrations').doc(btn.dataset.id).delete();
+        await removeLinkedProfile(btn.dataset.email, btn.dataset.id);
         toast('Registre eliminat.', 'success');
         loadAdminRegistrations();
       } catch (e) {
@@ -1252,6 +1578,8 @@
           <td>${formatTimestamp(d.timestamp)}</td>
           <td><button class="btn btn-danger btn-small btn-delete-reg" data-id="${doc.id}">Eliminar</button></td>
         `;
+        // dataset assignment keeps user-provided emails out of the HTML string
+        tr.querySelector('.btn-delete-reg').dataset.email = d.email || '';
         tbody.appendChild(tr);
       });
     } catch (e) {
@@ -1620,7 +1948,7 @@
   //  INIT
   // ═══════════════════════════════════════════════════════════
   function init() {
-    showView('view-landing');
+    showView('view-login');
 
     // Initialize all UI modules first so buttons always work
     initLanding();
@@ -1630,7 +1958,10 @@
     initSuccess();
     initLogin();
     initCapDashboard();
+    initCapSubnav();
     initCapOrders();
+    initCapPosts();
+    initUserDashboard();
     initAdminDashboard();
     initAdminServices();
     initAdminOrders();
