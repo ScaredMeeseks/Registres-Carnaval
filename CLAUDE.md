@@ -19,6 +19,7 @@ Git is the source of truth for everything.
   firebase deploy --only firestore:rules,storage
   ```
   `firebase.json` deliberately configures **only rules** — no hosting (GitHub Pages does that) and no indexes file (indexes are managed in the console; a composite index on registrations `(collaId asc, timestamp desc)` must exist).
+  **Before every deploy**: run `firebase use` and confirm it says `registre-carnaval`, then read the `=== Deploying to '...'` header. The CLI's remembered active project can override `.firebaserc` — on 2026-07-05 a deploy from this repo landed on `mundial2026-ec8e7` and wiped that project's rules. The `(project)` in the Cloud Shell prompt is gcloud's, not the Firebase CLI's.
 - **Firebase project**: `registre-carnaval` (config in `js/firebase-config.js`). Firestore + Auth + Storage.
 - Never edit rules directly in the Firebase Console — change the repo files and deploy.
 
