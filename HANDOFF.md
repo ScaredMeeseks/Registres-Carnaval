@@ -21,7 +21,7 @@ The lost orders feature (data survived in `orders`/`services`) was rebuilt: cap 
 
 **Its deploy steps (pending until done):**
 1. Cloud Shell data cleanup snippet: delete test order `UQxNkZ9zcy3XPhf7cUf6`, strip `link` + convert string `price`→number on the 4 services.
-2. `cd ~/Registres-Carnaval && git pull && firebase use registre-carnaval` (verify!) `&& firebase deploy --only firestore:rules,storage`.
+2. `cd ~/Registres-Carnaval && ./deploy.sh` (guard script: verifies repo + .firebaserc, pulls, deploys with explicit `--project`).
 3. Create composite index **orders (collaId ASC, createdAt DESC)** via console error link or manually.
 4. Test as cap (darnabar) + admin per CLAUDE.md.
 

@@ -13,13 +13,13 @@ UI language is **Catalan only** (no i18n system — strings are hardcoded in HTM
 Git is the source of truth for everything.
 
 - **Frontend**: GitHub Pages from `main` of https://github.com/ScaredMeeseks/Registres-Carnaval — **pushing to `main` deploys the site**. No build step.
-- **Firestore/Storage rules**: deployed from the repo via Cloud Shell:
+- **Firestore/Storage rules**: deployed from the repo via Cloud Shell using the guard script:
   ```bash
-  git pull            # (first time: git clone https://github.com/ScaredMeeseks/Registres-Carnaval.git)
-  firebase deploy --only firestore:rules,storage
+  cd ~/Registres-Carnaval && ./deploy.sh
+  # (first time: git clone https://github.com/ScaredMeeseks/Registres-Carnaval.git ~/Registres-Carnaval)
   ```
+  `deploy.sh` verifies the git remote and `.firebaserc`, pulls, and deploys with an explicit `--project registre-carnaval` — because on 2026-07-05 a bare `firebase deploy` from this folder landed on `mundial2026-ec8e7` (the CLI's remembered active project overrode `.firebaserc`) and wiped that project's rules. Never deploy with a bare `firebase deploy`; always the script, and still read the `=== Deploying to '...'` header. The `(project)` in the Cloud Shell prompt is gcloud's, not the Firebase CLI's.
   `firebase.json` deliberately configures **only rules** — no hosting (GitHub Pages does that) and no indexes file (indexes are managed in the console; composite indexes that must exist: registrations `(collaId asc, timestamp desc)` and orders `(collaId asc, createdAt desc)`).
-  **Before every deploy**: run `firebase use` and confirm it says `registre-carnaval`, then read the `=== Deploying to '...'` header. The CLI's remembered active project can override `.firebaserc` — on 2026-07-05 a deploy from this repo landed on `mundial2026-ec8e7` and wiped that project's rules. The `(project)` in the Cloud Shell prompt is gcloud's, not the Firebase CLI's.
 - **Firebase project**: `registre-carnaval` (config in `js/firebase-config.js`). Firestore + Auth + Storage.
 - Never edit rules directly in the Firebase Console — change the repo files and deploy.
 
