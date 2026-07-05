@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this app is
 
-**Registre Carnaval** — public registration app for carnival groups ("colles"). A participant enters a 6-character colla code, fills a personal-data form (name, surname, DNI/NIE, email, phone), confirms, scroll-reads the Terms & Conditions, and accepts — only then is the registration written to Firestore (single write, `tcAccepted: true`). Caps de colla and admins log in with email/password to manage registrations.
+**Registre Carnaval** — public registration + supply-ordering app for carnival groups ("colles"). A participant enters a 6-character colla code, fills a personal-data form (name, surname, DNI/NIE, email, phone), confirms, scroll-reads the Terms & Conditions, and accepts — only then is the registration written to Firestore (single write, `tcAccepted: true`). Caps de colla log in to manage their colla's registrations and place supply orders (Comandes) from an admin-managed catalog; admins manage caps, colles, the catalog, and see all registrations and orders.
 
 UI language is **Catalan only** (no i18n system — strings are hardcoded in HTML/JS).
 
@@ -14,7 +14,7 @@ UI language is **Catalan only** (no i18n system — strings are hardcoded in HTM
 
 Git is the source of truth for everything.
 
-- **Frontend**: GitHub Pages from `main` of https://github.com/ScaredMeeseks/Registres-Carnaval — **pushing to `main` deploys the site**. No build step.
+- **Frontend**: GitHub Pages from `main` of https://github.com/ScaredMeeseks/Registres-Carnaval — **pushing to `main` deploys the site**. No build step. **No cache control**: browsers may serve stale JS for a while after a deploy (a cap hit rules errors on 2026-07-05 because cached old JS queried fields the new rules reject) — after deploying breaking changes, expect users to need a hard refresh. Moving to Firebase Hosting (no-cache headers, private repo possible) was considered and deferred.
 - **Firestore/Storage rules**: deployed from the repo via Cloud Shell using the guard script:
   ```bash
   cd ~/Registres-Carnaval && ./deploy.sh
@@ -24,8 +24,9 @@ Git is the source of truth for everything.
   `firebase.json` deliberately configures **only rules** — no hosting (GitHub Pages does that) and no indexes file (indexes are managed in the console; composite indexes that must exist: registrations `(collaId asc, timestamp desc)` and orders `(collaId asc, createdAt desc)`).
 - **Firebase project**: `registre-carnaval` (config in `js/firebase-config.js`). Firestore + Auth + Storage.
 - Never edit rules directly in the Firebase Console — change the repo files and deploy.
+- One-off data scripts (migrations, cleanups, password sets) run from Cloud Shell `~` with the Admin SDK (`npm install firebase-admin --no-save`, ADC credentials are automatic).
 
-There is no test suite, no npm, no local server script.
+There is no test suite, no npm on the frontend, no local server script. After editing `js/app.js`, run `node --check js/app.js` — it's the only safety net; a syntax error breaks the whole app.
 
 ## Architecture
 
@@ -51,7 +52,7 @@ External CDN deps in `index.html`: Firebase compat SDKs, SheetJS (`XLSX`) for Ex
 
 ### Roles & security model
 
-- **Admin**: emails hardcoded in `firestore.rules`/`storage.rules` (`isAdmin()`): `marna96@gmail.com`, `said@magmamedia.cat`. No credentials in client code. Admin dashboard: manage caps, colles, all registrations.
+- **Admin**: emails hardcoded in `firestore.rules`/`storage.rules` (`isAdmin()`): `marna96@gmail.com`, `said@magmamedia.cat`. No credentials in client code. Admin dashboard: manage caps, colles, all registrations, the services catalog, and all orders.
 - **Cap de colla**: has a `caps/{email}` doc. Sees only colles where `colles.capEmails` contains their email. Rules enforce per-colla access to registrations server-side via `capOwnsColla()`: `request.auth.token.email in get(/colles/$(resource.data.collaId)).data.capEmails`. This works for queries **only because** the cap dashboard filters with `where('collaId','==',…)` — an equality filter the rules engine can bind. Don't change those queries to other fields without rethinking the rules.
 - **Anonymous**: public read of `colles` (landing code check) and validated create of `registrations` (must have exactly the known keys, `tcAccepted == true`, and an existing `collaId`). No anonymous updates or deletes anywhere.
 - Routing happens in `onAuthStateChanged` (`initAuthListener`): checks `admins/{email}` doc, then `caps/{email}` doc, else signs out.

@@ -40,13 +40,14 @@ CDN deps: Firebase 10 compat, SheetJS (Excel), Google Fonts (Oswald). After edit
 
 Git is the source of truth for everything.
 
-- **Frontend**: push to `main` → GitHub Pages (https://scaredmeeseks.github.io/Registres-Carnaval/). No cache-bump mechanism; browsers may serve stale JS for a while.
+- **Frontend**: push to `main` → GitHub Pages (https://scaredmeeseks.github.io/Registres-Carnaval/).
 - **Rules**: Cloud Shell → `cd ~/Registres-Carnaval && ./deploy.sh`. The guard script verifies git remote + `.firebaserc`, pulls, and deploys with explicit `--project registre-carnaval` (see CLAUDE.md for the 2026-07-05 wrong-project incident that motivated it). Never bare `firebase deploy`.
 - **Indexes**: managed in the console, deliberately not in the repo.
 - Admin SDK one-off scripts (migrations, cleanups, password sets) run from Cloud Shell `~` with `firebase-admin` + built-in credentials.
 
 ## Known issues / accepted trade-offs
 
+- **Stale JS after deploys**: GitHub Pages offers no cache control, and rules changes can break cached old frontends (2026-07-05: a cap got "Error carregant registres" because cached JS still queried by `collaCode`, which the new rules reject; fixed by hard refresh). If this recurs, the fix is moving hosting to Firebase Hosting with no-cache headers (considered 2026-07-05, deferred).
 - `colles` is publicly readable (needed for landing code validation) → colla names + cap emails are enumerable.
 - Anonymous `registrations` create is open (validated shape only) — App Check would be the next step if spam appears.
 - Old registrations whose colla was deleted have no `collaId` → invisible to caps, admin-only.
@@ -55,7 +56,7 @@ Git is the source of truth for everything.
 
 ## Changelog
 
-### 2026-07-05 (later) — Comandes feature rebuilt (`4bf2c66`, `b4fcd1c`)
+### 2026-07-05 (later) — Comandes feature rebuilt (`4bf2c66`, `b4fcd1c`) — deployed + cap flow verified live same day
 - Rebuilt the lost orders feature from surviving Firestore data (`services` + `orders` collections; original code was never committed).
 - Cap dashboard: Registres/Comandes sub-nav; catalog grouped by category with live total; per-colla order history with delete. Orders snapshot item prices; `total` stored rounded to cents.
 - Admin: Serveis tab (CRUD, image upload to Storage `services/` storing `imagePath` for deletion, legacy docs fall back to `refFromURL`); Comandes tab (all orders, colla filter, expandable detail rows, aggregated totals, two-sheet Excel export).
