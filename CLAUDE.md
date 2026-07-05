@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Read `CONTEXT.md` first** — it is the rolling architecture + changelog document and MUST be updated after every code change.
+
 ## What this app is
 
 **Registre Carnaval** — public registration app for carnival groups ("colles"). A participant enters a 6-character colla code, fills a personal-data form (name, surname, DNI/NIE, email, phone), confirms, scroll-reads the Terms & Conditions, and accepts — only then is the registration written to Firestore (single write, `tcAccepted: true`). Caps de colla and admins log in with email/password to manage registrations.
